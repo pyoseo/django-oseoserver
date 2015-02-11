@@ -132,6 +132,7 @@ def process_online_data_access_item(self, order_item_id):
             order_item.identifier, order_item.item_id, order.id,
             order.user.user.username, options, delivery_options,
             domain=Site.objects.get_current().domain,
+            sub_uri=django_settings.SITE_SUB_URI,
             **params)
         order_item.additional_status_info = details
         if any(urls):
