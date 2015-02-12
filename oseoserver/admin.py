@@ -105,7 +105,8 @@ class OrderAdmin(admin.ModelAdmin):
                        'mission_specific_status_info')
         }),
     )
-    list_display = ('id', 'status', 'status_changed_on', 'show_batches',)
+    list_display = ('id', 'status', 'status_changed_on', 'user', 
+                    'show_batches',)
     list_filter = ('status', 'user',)
     readonly_fields = ('status_changed_on', 'completed_on',
                        'last_describe_result_access_request',)
@@ -151,7 +152,7 @@ class PendingOrderAdmin(admin.ModelAdmin):
 
 @admin.register(models.ProductOrder)
 class ProductOrderAdmin(admin.ModelAdmin):
-    list_display = ("id", "status",)
+    list_display = ("id", "status", "user",)
     list_editable = ("status",)
 
 
