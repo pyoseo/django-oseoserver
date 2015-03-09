@@ -182,6 +182,8 @@ class OrderItemAdmin(admin.ModelAdmin):
     )
     list_display = ('id', 'item_id', 'link_to_batch', 'link_to_order',
                     'status', 'status_changed_on', 'additional_status_info',)
+    list_filter = ('batch__order', 'status',)
+    date_hierarchy = 'status_changed_on'
     readonly_fields = ('status_changed_on', 'completed_on',)
 
     def link_to_batch(self, obj):
