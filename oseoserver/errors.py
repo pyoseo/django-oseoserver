@@ -16,10 +16,12 @@
 Custom exception classes for oseoserver
 """
 
-class PyOseoError(Exception):
+from oseoserver.models import Order
+
+class OseoServerError(Exception):
     pass
 
-class ServerError(PyOseoError):
+class ServerError(OseoServerError):
     """
     Used for errors which are related to server-side operations
     """
@@ -27,24 +29,15 @@ class ServerError(PyOseoError):
     pass
 
 
-class UnAuthorizedOrder(PyOseoError):
+class UnAuthorizedOrder(OseoServerError):
     pass
 
 
-class NonSoapRequestError(PyOseoError):
+class NonSoapRequestError(OseoServerError):
     pass
 
 
-class InvalidOrderTypeError(PyOseoError):
-
-    def __init__(self, order_type):
-        self.order_type = order_type
-
-    def __str__(self):
-        return "Orders of type {} are not allowed".format(self.order_type)
-
-
-class InvalidPackagingError(PyOseoError):
+class InvalidPackagingError(OseoServerError):
 
     def __init__(self, packaging):
         self.packaging = packaging
@@ -53,7 +46,7 @@ class InvalidPackagingError(PyOseoError):
         return "Packaging format {} is not supported".format(self.packaging)
 
 
-class InvalidOptionError(PyOseoError):
+class InvalidOptionError(OseoServerError):
 
     def __init__(self, option, order_config):
         self.option = option
@@ -71,7 +64,7 @@ class InvalidGlobalOptionError(InvalidOptionError):
     pass
 
 
-class InvalidOptionValueError(PyOseoError):
+class InvalidOptionValueError(OseoServerError):
 
     def __init__(self, option, value, order_config):
         self.option = option
@@ -87,14 +80,7 @@ class InvalidGlobalOptionValueError(InvalidOptionValueError):
     pass
 
 
-class InvalidDeliveryOptionError(PyOseoError):
-
-    def __init__(self, collection, order_type):
-        self.collection = collection
-        self.order_type = order_type
-
-
-class CustomOptionParsingError(PyOseoError):
+class CustomOptionParsingError(OseoServerError):
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
@@ -103,42 +89,27 @@ class CustomOptionParsingError(PyOseoError):
         return "CustomOptionParsingError: {} {}".format(self.args, self.kwargs)
 
 
-class InvalidGlobalDeliveryOptionError(PyOseoError):
+class InvalidOrderDeliveryMethodError(OseoServerError):
     pass
 
 
-class InvalidOrderDeliveryMethodError(PyOseoError):
+class OnlineDataAccessInvalidProtocol(OseoServerError):
     pass
 
 
-class InvalidCollectionError(PyOseoError):
-
-    def __init__(self, collection, order_type):
-        self.collection = collection
-        self.order_type = order_type
-
-    def __str__(self):
-        return "Collection {} does not allow orders of type {}".format(
-            self.collection, self.order_type)
-
-
-class OnlineDataAccessInvalidProtocol(PyOseoError):
+class OnlineDataDeliveryInvalidProtocol(OseoServerError):
     pass
 
 
-class OnlineDataDeliveryInvalidProtocol(PyOseoError):
+class OperationNotImplementedError(OseoServerError):
     pass
 
 
-class OperationNotImplementedError(PyOseoError):
+class SubmitWithQuotationError(OseoServerError):
     pass
 
 
-class SubmitWithQuotationError(PyOseoError):
-    pass
-
-
-class OseoError(PyOseoError):
+class OseoError(OseoServerError):
 
     def __init__(self, code, text, locator=None):
         self.code = code
@@ -146,6 +117,43 @@ class OseoError(PyOseoError):
         self.locator = locator
 
 
-class InvalidSettingsError(PyOseoError):
+class InvalidOrderTypeError(OseoError):
+
+    def __init__(self, order_type):
+        locator = "orderType"
+        if order_type in (Order.PRODUCT_ORDER, Order.MASSIVE_ORDER):
+            code = "ProductOrderingNotSupported"
+            text = "Ordering not supported"
+        elif order_type == Order.SUBSCRIPTION_ORDER:
+            code = "SubscriptionNotSupported"
+            text = "Subscription not supported"
+        elif order_type == Order.TASKING_ORDER:
+            code = "FutureProductNotSupported"
+            text = "Programming not supported"
+        else:
+            code = "InvalidParameterValue"
+            text = "Invalid value for Parameter"
+        super(InvalidOrderTypeError, self).__init__(code, text, locator)
+
+
+class InvalidCollectionError(OseoError):
+
+    def __init__(self):
+        locator = "collectionId"
+        code = "InvalidParameterValue"
+        text = "Invalid value for Parameter"
+        super(InvalidCollectionError, self).__init__(code, text, locator)
+
+
+class InvalidDeliveryOptionError(OseoError):
+
+    def __init__(self):
+        locator = "deliveryOptions"
+        code = "InvalidParameterValue"
+        text = "Invalid value for Parameter"
+        super(InvalidDeliveryOptionError, self).__init__(code, text, locator)
+
+
+class InvalidSettingsError(OseoServerError):
     pass
 

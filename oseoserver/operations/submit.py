@@ -37,7 +37,7 @@ from oseoserver import utilities
 from oseoserver.server import OseoServer
 from oseoserver.operations.base import OseoOperation
 
-logger = logging.getLogger('.'.join(('pyoseo', __name__)))
+logger = logging.getLogger('.'.join(('oseoserver', __name__)))
 
 
 class Submit(OseoOperation):
@@ -58,6 +58,10 @@ class Submit(OseoOperation):
         status_code = 200
         status_notification = self.validate_status_notification(request)
         if request.orderSpecification is not None:
+            requested_spec = request.orderSpecification
+            if len(requested_spec.orderItem) > models.Order.MAX_ORDER_ITEMS:
+                raise errors.OseoError("NoApplicableCode",
+                                       "Code not applicable")
             order_spec = self.process_order_specification(
                 request.orderSpecification, user)
         else:
@@ -92,11 +96,6 @@ class Submit(OseoOperation):
             "order_type": self._get_order_type(order_specification),
             "order_item": [],
         }
-        if len(order_specification.orderItem) > models.Order.MAX_ORDER_ITEMS:
-            raise errors.InvalidOrderError(
-                "Maximum number of order items is {}".format(
-                    models.Order.MAX_ORDER_ITEMS)
-            )
         for oi in order_specification.orderItem:
             item = self.validate_order_item(oi, spec["order_type"],
                                             user)
@@ -128,9 +127,6 @@ class Submit(OseoOperation):
         except errors.InvalidOptionValueError as e:
             raise errors.InvalidGlobalOptionValueError(e.option, e.value,
                                                        e.order_config)
-        except errors.InvalidDeliveryOptionError as e:
-            logger.debug(e)
-            raise errors.InvalidGlobalDeliveryOptionError()
         return spec
 
     def create_order(self, order_spec, user, status_notification, status,
@@ -178,6 +174,7 @@ class Submit(OseoOperation):
             order.selected_options.add(models.SelectedOption(option=option,
                                                              value=v))
         delivery = order_spec["delivery_options"]
+        # raise an error if there are no delivery options
         if delivery is not None:
             copies = 1 if delivery["copies"] is None else delivery["copies"]
             sdo = models.SelectedDeliveryOption(
@@ -383,8 +380,7 @@ class Submit(OseoOperation):
         else:  # tasking order
             config = collection.taskingorderconfiguration
         if not config.enabled:
-            raise errors.InvalidCollectionError(collection.name,
-                                                order_type.name)
+            raise errors.InvalidOrderTypeError(order_type.name)
         return config
 
     def _validate_requested_collection(self, collection_id, group):
@@ -397,8 +393,7 @@ class Submit(OseoOperation):
                     "products".format(collection.name)
                 )
         except models.Collection.DoesNotExist:
-            raise errors.InvalidCollectionError(
-                "Collection {} does not exist".format(collection_id))
+            raise errors.InvalidCollectionError()
         return collection
 
     def _validate_requested_options(self, requested_item, order_type,

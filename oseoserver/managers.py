@@ -7,6 +7,6 @@ class OrderPendingModerationManager(models.Manager):
     def get_queryset(self):
         return super(OrderPendingModerationManager,
                      self).get_queryset().filter(
-            status=oseoserver_models.CustomizableItem.SUBMITTED)
+            status=oseoserver_models.Order.SUBMITTED)
 
 

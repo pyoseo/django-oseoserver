@@ -116,6 +116,7 @@ class OrderAdmin(admin.ModelAdmin):
 @admin.register(models.OrderPendingModeration)
 class PendingOrderAdmin(admin.ModelAdmin):
     actions = ['approve_order', 'reject_order',]
+    list_display = ("id", "order_type", "user",)
 
     def get_queryset(self, request):
         qs = super(PendingOrderAdmin, self).get_queryset(request)
@@ -158,7 +159,7 @@ class ProductOrderAdmin(admin.ModelAdmin):
 
 @admin.register(models.SubscriptionOrder)
 class SubscriptionOrderAdmin(admin.ModelAdmin):
-    pass
+    list_display = ("id", "status", "user",)
 
 
 @admin.register(models.OrderItem)

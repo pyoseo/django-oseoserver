@@ -109,6 +109,9 @@ class OseoServer(object):
         "NoApplicableCode": "client",
         "UnsupportedCollection": "client",
         "InvalidParameterValue": "client",
+        "SubscriptionNotSupported": "client",
+        "ProductOrderingNotSupported": "client",
+        "FutureProductNotSupported": "client",
     }
 
     OPERATION_CLASSES = {
