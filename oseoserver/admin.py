@@ -252,6 +252,11 @@ class BatchAdmin(admin.ModelAdmin):
                     'completed_on', 'updated_on',)
 
 
+@admin.register(models.SubscriptionBatch)
+class SubscriptionBatchAdmin(admin.ModelAdmin):
+    list_display = ('id', 'timeslot', 'collection', 'status', 'price',
+                    'created_on', 'completed_on', 'updated_on',)
+
 @admin.register(models.MediaDelivery)
 class MediaDeliveryAdmin(admin.ModelAdmin):
     list_display = ("package_medium", "shipping_instructions", "delivery_fee")

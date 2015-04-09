@@ -16,8 +16,6 @@
 Custom exception classes for oseoserver
 """
 
-from oseoserver.models import Order
-
 class OseoServerError(Exception):
     pass
 
@@ -121,13 +119,13 @@ class InvalidOrderTypeError(OseoError):
 
     def __init__(self, order_type):
         locator = "orderType"
-        if order_type in (Order.PRODUCT_ORDER, Order.MASSIVE_ORDER):
+        if order_type in ("PRODUCT_ORDER", "MASSIVE_ORDER"):
             code = "ProductOrderingNotSupported"
             text = "Ordering not supported"
-        elif order_type == Order.SUBSCRIPTION_ORDER:
+        elif order_type == "SUBSCRIPTION_ORDER":
             code = "SubscriptionNotSupported"
             text = "Subscription not supported"
-        elif order_type == Order.TASKING_ORDER:
+        elif order_type == "TASKING_ORDER":
             code = "FutureProductNotSupported"
             text = "Programming not supported"
         else:

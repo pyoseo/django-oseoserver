@@ -61,7 +61,7 @@ import errors
 import utilities
 from auth.usernametoken import UsernameTokenAuthentication
 
-logger = logging.getLogger('.'.join(('pyoseo', __name__)))
+logger = logging.getLogger('.'.join(('oseoserver', __name__)))
 
 
 class OseoServer(object):
@@ -478,12 +478,57 @@ class OseoServer(object):
         if order.status == models.CustomizableItem.SUBMITTED:
             utilities.send_moderation_email(order)
         elif order.status == models.CustomizableItem.ACCEPTED:
-            logger.debug("sending order {} to processing queue...".format(
+            logger.debug("Sending order {} to processing queue...".format(
                 order.id))
             if order.order_type.name == models.Order.PRODUCT_ORDER:
                 tasks.process_product_order.apply_async((order.id,))
             elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
-                tasks.process_subscription_order.apply_async((order.id, kwargs))
+                self.dispatch_subscription_order(kwargs["timeslot"],
+                                                 kwargs["collection"])
+        elif order.status == models.CustomizableItem.CANCELLED:
+            logger.warning("Order {} is cancelled. Dispatching "
+                           "anyway...".format(order.id))
+
+    def dispatch_subscription_order(self, order, timeslot, collection):
+        """
+        Create a new subscription batch and send it to the processing queue.
+
+        :param timeslot:
+        :param collection:
+        :return:
+        """
+        processor, params = utilities.get_processor(
+            order.order_type,
+            models.ItemProcessor.PROCESSING_PROCESS_ITEM,
+            logger_type="pyoseo"
+        )
+        identifiers = processor.get_subscription_batch_identifiers(
+            timeslot, collection, **params)
+        try:
+            col = models.Collection.objects.get(name=collection)
+            collection_item = order.batches.first().order_items.get(
+                collection=col)
+            collection_item_options = collection_item.selected_options.all()
+            # TODO add also the delivery_options and other options
+        except models.Collection.DoesNotExist:
+            raise errors.InvalidCollectionError
+        batch = models.SubscriptionBatch(collection=col, timeslot=timeslot)
+        batch.save()
+        # django way of cloning model instances is to set the pk and id to None
+        for ident in identifiers:
+            new_item = collection_item
+            new_item.pk = None
+            new_item.id = None
+            new_item.identifier = ident
+            new_item.save()
+            new_item.selected_options = collection_item_options
+            new_item.status = None
+            new_item.additional_status_info = ""
+            new_item.batch = batch
+            new_item.save()
+        batch.save()
+        order.save()
+        #tasks.process_subscription_batch.apply_async((batch.id,))
 
     def process_subscriptions(self, current_timeslot):
         for s in models.SubscriptionOrder.objects.filter(active=True):

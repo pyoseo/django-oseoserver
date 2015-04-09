@@ -26,6 +26,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.models import User
 
 import managers
+import errors
 
 
 class AbstractDeliveryAddress(models.Model):
@@ -119,6 +120,43 @@ class Batch(models.Model):
             downloaded = list(downloaded)  # forcing evaluation of the queryset
             expired.extend(downloaded)
         return list(set(expired))
+
+    def create_order_item(self, status, additional_status_info,
+                          order_item_spec):
+        item = OrderItem(
+            batch=self,
+            status=status,
+            additional_status_info=additional_status_info,
+            remark=order_item_spec["order_item_remark"],
+            collection=order_item_spec["collection"],
+            identifier=order_item_spec.get("identifier", ""),
+            item_id=order_item_spec["item_id"]
+        )
+        item.save()
+        for k, v in order_item_spec["option"].iteritems():
+            option = Option.objects.get(name=k)
+            item.selected_options.add(SelectedOption(option=option,
+                                                     value=v))
+        for k, v in order_item_spec["scene_selection"].iteritems():
+            item.selected_scene_selection_options.add(
+                SelectedSceneSelectionOption(option=k, value=v))
+        delivery = order_item_spec["delivery_options"]
+        if delivery is not None:
+            copies = 1 if delivery["copies"] is None else delivery["copies"]
+            sdo = SelectedDeliveryOption(
+                customizable_item=item,
+                annotation=delivery["annotation"],
+                copies=copies,
+                special_instructions=delivery["special_instructions"],
+                option=delivery["type"]
+            )
+            sdo.save()
+        if order_item_spec["payment"] is not None:
+            payment = PaymentOption.objects.get(order_item_spec["payment"])
+            item.selected_payment_option = SelectedPaymentOption(
+                option=payment)
+        item.save()
+        return item
 
     class Meta:
         verbose_name_plural = "batches"
@@ -508,6 +546,18 @@ class Order(CustomizableItem):
         return ', '.join([str(b.id) for b in self.batches.all()])
     show_batches.short_description = 'available batches'
 
+
+    def create_batch(self, item_status, additional_status_info,
+                     *order_item_spec):
+        batch = Batch()
+        batch.save()
+        for oi in order_item_spec:
+            batch.create_order_item(item_status, additional_status_info,
+                                    oi)
+        self.batches.add(batch)
+        return batch
+
+
     def __unicode__(self):
         return '{}'.format(self.id)
 
@@ -523,48 +573,6 @@ class OrderPendingModeration(Order):
 
 class ProductOrder(Order):
 
-    def create_batch(self, item_status, *order_item_spec):
-        batch = Batch()
-        batch.save()
-        for oi in order_item_spec:
-            item = OrderItem(
-                batch=batch,
-                status=item_status,
-                additional_status_info="Order item has been submitted and "
-                                       "is awaiting approval",
-                remark=oi["order_item_remark"],
-                collection=oi["collection"],
-                identifier=oi["identifier"],
-                item_id=oi["item_id"]
-            )
-            item.save()
-
-            for k, v in oi["option"].iteritems():
-                option = Option.objects.get(name=k)
-                item.selected_options.add(SelectedOption(option=option,
-                                                         value=v))
-            for k, v in oi["scene_selection"].iteritems():
-                item.selected_scene_selection_options.add(
-                    SelectedSceneSelectionOption(option=k, value=v))
-            delivery = oi["delivery_options"]
-            if delivery is not None:
-                copies = 1 if delivery["copies"] is None else delivery["copies"]
-                sdo = SelectedDeliveryOption(
-                    customizable_item=item,
-                    annotation=delivery["annotation"],
-                    copies=copies,
-                    special_instructions=delivery["special_instructions"],
-                    option=delivery["type"]
-                )
-                sdo.save()
-            if oi["payment"] is not None:
-                payment = PaymentOption.objects.get(oi["payment"])
-                item.selected_payment_option = SelectedPaymentOption(
-                    option=payment)
-            item.save()
-        self.batches.add(batch)
-        return batch
-
     def __unicode__(self):
         return "ProductOrder({})".format(self.id)
 
@@ -573,16 +581,42 @@ class DerivedOrder(Order):
     collections = models.ManyToManyField("Collection",
                                          related_name="derived_orders")
 
-    def create_batch(self):
-        raise NotImplementedError
-
 
 class MassiveOrder(DerivedOrder):
     pass
 
 
 class SubscriptionOrder(DerivedOrder):
-    pass
+
+    def create_batch(self, item_status, additional_status_info,
+                     *order_item_spec, **kwargs):
+        """
+        Create a batch for a subscription order.
+
+        Subscription orders are different from normal product orders because
+        the user is not supposed to be able to ask for the same collection
+        twice.
+
+        :param item_status:
+        :param additional_status_info:
+        :param order_item_spec:
+        :return:
+        """
+
+        batch = Batch()
+        batch.save()
+        for oi in order_item_spec:
+            collection = oi["collection"]
+            previous_collections = [oi.collection for oi in
+                                    batch.order_items.all()]
+            if collection not in previous_collections:
+                batch.create_order_item(item_status, additional_status_info,
+                                        oi)
+            else:
+                raise errors.InvalidCollectionError
+        self.batches.add(batch)
+        return batch
+
 
 
 class TaskingOrder(DerivedOrder):
@@ -790,3 +824,9 @@ class SelectedDeliveryOption(models.Model):
         return self.option.__unicode__()
 
 
+class SubscriptionBatch(Batch):
+    timeslot = models.DateTimeField()
+    collection = models.ForeignKey(Collection)
+
+    class Meta:
+        verbose_name_plural = "subscription batches"

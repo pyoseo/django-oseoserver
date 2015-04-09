@@ -70,6 +70,16 @@ def process_product_order(self, order_id):
     job.apply_async()
 
 
+# subscriptions:
+# * the server.dispatch_order() creates a batch or finds the previously
+#   created batch
+#  * then it calls server.dispatch_batch(timeslot, collection) which will
+#    in turn call tasks.process_subscription_batch(batch_id)
+@shared_task(bind=True)
+def process_subscription_batch(self, batch_id):
+    pass
+
+
 @shared_task(bind=True)
 def process_product_order_batch(self, batch_id):
     """

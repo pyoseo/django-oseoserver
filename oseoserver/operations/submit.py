@@ -67,13 +67,19 @@ class Submit(OseoOperation):
         else:
             raise errors.SubmitWithQuotationError('Submit with quotationId is '
                                                   'not implemented.')
+        # raise an error if there are no delivery options on the
+        # order_specification either at the order or order item levels
         default_status = models.Order.SUBMITTED
         additional_status_info = ("Order is awaiting approval")
+        item_additional_status_info = ""
         if order_spec["order_type"].automatic_approval:
             default_status = models.Order.ACCEPTED
             additional_status_info = ("Order is placed in processing queue")
+            item_additional_status_info = ("Order item has been placed in the "
+                                           "processing queue")
         order = self.create_order(order_spec, user, status_notification,
-                                  default_status, additional_status_info)
+                                  default_status, additional_status_info,
+                                  item_additional_status_info)
         response = oseo.SubmitAck(status='success')
         response.orderId = str(order.id)
         response.orderReference = self._n(order.reference)
@@ -130,7 +136,7 @@ class Submit(OseoOperation):
         return spec
 
     def create_order(self, order_spec, user, status_notification, status,
-                     additional_status_info):
+                     additional_status_info, item_additional_status_info=""):
         """
         Persist the order specification in the database.
 
@@ -174,7 +180,6 @@ class Submit(OseoOperation):
             order.selected_options.add(models.SelectedOption(option=option,
                                                              value=v))
         delivery = order_spec["delivery_options"]
-        # raise an error if there are no delivery options
         if delivery is not None:
             copies = 1 if delivery["copies"] is None else delivery["copies"]
             sdo = models.SelectedDeliveryOption(
@@ -186,9 +191,11 @@ class Submit(OseoOperation):
             )
             sdo.save()
         order.save()
-        if order.order_type.name == models.Order.PRODUCT_ORDER:
-            batch = order.create_batch(order.status,
-                                       *order_spec["order_item"])
+        batch = order.create_batch(
+            order.status,
+            item_additional_status_info,
+            *order_spec["order_item"]
+        )
         return order
 
     def get_delivery_information(self, requested_delivery_info):
