@@ -37,7 +37,7 @@ from oseoserver import utilities
 from oseoserver.server import OseoServer
 from oseoserver.operations.base import OseoOperation
 
-logger = logging.getLogger('.'.join(('oseoserver', __name__)))
+logger = logging.getLogger(__name__)
 
 
 class Submit(OseoOperation):

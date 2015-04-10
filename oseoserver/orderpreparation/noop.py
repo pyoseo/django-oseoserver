@@ -19,7 +19,7 @@ example of the API that PyOSEO expects to find on a real implementation
 
 import logging
 
-logger = logging.getLogger('.'.join(('pyoseo', __name__)))
+logger = logging.getLogger(__name__)
 
 
 class FakeOrderProcessor(object):
@@ -40,6 +40,21 @@ class FakeOrderProcessor(object):
         logger.debug("value: {}".format(value))
         logger.debug("parsed_value: {}".format(parsed_value))
         return parsed_value
+
+
+    def get_subscription_batch_identifiers(self, timeslot, collection,
+                                           **kwargs):
+        """
+        Find the identifiers for resources of a subscription batch
+
+        :param timeslot:
+        :type timeslot: datetime.datetime
+        :param collection:
+        :type collection: basestring
+        :return:
+        """
+
+        return ["fake_identifier"]
 
     def process_item_online_access(identifier, item_id, order_id, user_name,
                                    packaging, options, delivery_options,
