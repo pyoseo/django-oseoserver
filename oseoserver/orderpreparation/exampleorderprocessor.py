@@ -13,8 +13,9 @@
 #   limitations under the License.
 
 """
-A default order processing module for PyOSEO. It does nothing, but serves as an
-example of the API that PyOSEO expects to find on a real implementation
+A default order processing module for oseoserver. It does nothing, but
+serves as an example of the API that oseoserver expects to find on a real
+implementation.
 """
 
 import logging
@@ -22,7 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class FakeOrderProcessor(object):
+class ExampleOrderProcessor(object):
 
     def __init__(self, **kwargs):
         pass

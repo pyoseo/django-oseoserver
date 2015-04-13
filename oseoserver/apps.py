@@ -9,3 +9,5 @@ class OseoServerConfig(AppConfig):
         import oseoserver.signals.handlers
         registry.register(self.get_model("OseoUser"))
         registry.register(self.get_model("ProductOrder"))
+        registry.register(self.get_model("SubscriptionOrder"))
+        registry.register(self.get_model("SubscriptionBatch"))

@@ -162,7 +162,7 @@ class Batch(models.Model):
         verbose_name_plural = "batches"
 
     def __unicode__(self):
-        return str(self.id)
+        return str("{}({})".format(self.__class__.__name__, self.id))
 
 
 class Collection(models.Model):
@@ -574,7 +574,7 @@ class OrderPendingModeration(Order):
 class ProductOrder(Order):
 
     def __unicode__(self):
-        return "ProductOrder({})".format(self.id)
+        return "{}({})".format(self.__class__.__name__, self.id)
 
 
 class DerivedOrder(Order):
@@ -583,7 +583,9 @@ class DerivedOrder(Order):
 
 
 class MassiveOrder(DerivedOrder):
-    pass
+
+    def __unicode__(self):
+        return "{}({})".format(self.__class__.__name__, self.id)
 
 
 class SubscriptionOrder(DerivedOrder):
@@ -617,10 +619,14 @@ class SubscriptionOrder(DerivedOrder):
         self.batches.add(batch)
         return batch
 
+    def __unicode__(self):
+        return "{}({})".format(self.__class__.__name__, self.id)
 
 
 class TaskingOrder(DerivedOrder):
-    pass
+
+    def __unicode__(self):
+        return "{}({})".format(self.__class__.__name__, self.id)
 
 
 class OrderType(models.Model):
@@ -830,3 +836,7 @@ class SubscriptionBatch(Batch):
 
     class Meta:
         verbose_name_plural = "subscription batches"
+
+    def __unicode__(self):
+        return str("{}({})".format(self.__class__.__name__, self.id))
+

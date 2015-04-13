@@ -83,7 +83,7 @@ class Submit(OseoOperation):
         response = oseo.SubmitAck(status='success')
         response.orderId = str(order.id)
         response.orderReference = self._n(order.reference)
-        return response, status_code, {"order": order}
+        return response, status_code, order
 
     def process_order_specification(self, order_specification, user):
         """

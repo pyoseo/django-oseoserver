@@ -248,7 +248,7 @@ class CollectionAdmin(admin.ModelAdmin):
 
 @admin.register(models.Batch)
 class BatchAdmin(admin.ModelAdmin):
-    list_display = ('id', 'status', 'price', 'created_on',
+    list_display = ('id', 'order', 'status', 'price', 'created_on',
                     'completed_on', 'updated_on',)
 
 

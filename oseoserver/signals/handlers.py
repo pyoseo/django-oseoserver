@@ -4,9 +4,7 @@ import pytz
 from django.dispatch import receiver
 from django.db.models.signals import post_save, post_init, pre_save
 from django.contrib.auth.models import User
-from django.conf import settings
 from actstream import action
-from mailqueue.models import MailerMessage
 
 import oseoserver.models as models
 
@@ -118,3 +116,23 @@ def moderate_product_order(sender, **kwargs):
         for staff in User.objects.filter(is_staff=True):
             action.send(order, verb="awaits moderation by",
                         target=staff.oseouser)
+
+
+@receiver(post_save, sender=models.SubscriptionOrder, weak=False,
+          dispatch_uid='id_for_notify_subscription_order')
+def notify_subscription_order(sender, **kwargs):
+    order = kwargs["instance"]
+    user = order.user
+    if kwargs["created"]:
+        if order.order_type.notify_creation:
+            action.send(user, verb="created", target=order)
+    elif order.status == models.Order.CANCELLED:
+        action.send(order, verb="has been cancelled")
+
+
+@receiver(post_save, sender=models.SubscriptionBatch, weak=False,
+          dispatch_uid='id_for_notify_subscription_batch')
+def notify_subscription_batch(sender, **kwargs):
+    batch = kwargs["instance"]
+    if kwargs["created"]:
+        action.send(batch, verb="created")

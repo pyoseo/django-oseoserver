@@ -27,17 +27,17 @@ The celery worker can be started with the command:
 #   and communicate with the database over HTTP. This allows the task to
 #   run somewhere else, instead of having it in the same machine
 
-import re
 import datetime as dt
 from datetime import datetime, timedelta
 
 import pytz
-from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings as django_settings
 from django.contrib.sites.models import Site
+from django.db.models import Q
 from celery import shared_task
-from celery import group, chord
+from celery import group, chord, chain
 from celery.utils.log import get_task_logger
+from actstream import action
 
 from oseoserver import models
 from oseoserver import utilities
@@ -64,31 +64,14 @@ def process_product_order(self, order_id):
         raise
     g = []
     for batch in order.batches.all():
-        sig = process_product_order_batch.subtask((batch.id,))
+        sig = process_batch.subtask((batch.id,))
         g.append(sig)
     job = group(g)
     job.apply_async()
 
 
-# subscriptions:
-# * the server.dispatch_order() creates a batch or finds the previously
-#   created batch
-#  * then it calls server.dispatch_batch(timeslot, collection) which will
-#    in turn call tasks.process_subscription_batch(batch_id)
 @shared_task(bind=True)
-def process_subscription_batch(self, batch_id):
-    pass
-
-
-@shared_task(bind=True)
-def process_product_order_batch(self, batch_id):
-    """
-    Process an order batch.
-
-    :arg batch_id:
-    :type batch_id: int
-    """
-
+def process_batch(self, batch_id, update_order_status=True):
     try:
         batch = models.Batch.objects.get(pk=batch_id)
     except models.Batch.DoesNotExist:
@@ -110,10 +93,33 @@ def process_product_order_batch(self, batch_id):
         else:
             raise
         header.append(sig)
-    body = update_product_order_status.subtask((order.id,),
-                                               immutable=True)
-    c = chord(header, body)
-    c.apply_async()
+    if update_order_status:
+        body = update_product_order_status.subtask((order.id,),
+                                                   immutable=True)
+        job = chord(header, body)
+    else:
+        job = group(header)
+    c = chain(
+        job.apply_async(),
+        notify_batch_execution_ended.apply_async((batch_id,), immutable=True)
+    )
+    #job.apply_async()
+
+
+@shared_task(bind=True)
+def notify_batch_execution_ended(self, batch_id):
+    batch = models.Batch.objects.get(pk=batch_id)
+    try:
+        b = batch.subscriptionbatch
+    except models.SubscriptionBatch.DoesNotExist:
+        b = batch
+    action.send(b, verb="has finished execution")
+    subject = "{} is ready to download".format(b)
+    message = subject
+    recipients = models.User.objects.filter(
+        Q(is_staff=True) | Q(pk = b.order.user.user.pk)
+    ).exclude(email="")
+    utilities.send_email(subject, message, recipients)
 
 
 @shared_task(bind=True)

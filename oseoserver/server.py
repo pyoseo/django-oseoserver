@@ -45,15 +45,10 @@ that preform each OSEO operation.
 
 import logging
 
-from django.conf import settings as django_settings
-from django.core.exceptions import ObjectDoesNotExist
 from lxml import etree
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows as ows_bindings
 import pyxb
-from mailqueue.models import MailerMessage
-from django.contrib.auth.models import User
-from django.conf import settings
 
 from oseoserver import tasks
 import models
@@ -125,8 +120,7 @@ class OseoServer(object):
     }
 
     def process_request(self, request_data):
-        """
-        Entry point for the ordering service.
+        """Entry point for the ordering service.
 
         This method receives the raw request data as a string and then parses
         it into a valid pyxb OSEO object. It will then send the request to the
@@ -159,9 +153,14 @@ class OseoServer(object):
             user = self.authenticate_request(element, soap_version)
             schema_instance = self.parse_xml(data)
             operation, op_name = self._get_operation(schema_instance)
-            response, status_code, info = operation(schema_instance, user)
+            response, status_code, order = operation(schema_instance, user)
             if op_name == "Submit":
-                self.dispatch_order(info["order"])
+                if order.status == models.CustomizableItem.SUBMITTED:
+                    utilities.send_moderation_email(order)
+                else:
+                    order_type = order.order_type.name
+                    if order_type == models.Order.PRODUCT_ORDER:
+                        self.dispatch_product_order(order)
             if soap_version is not None:
                 result = self._wrap_soap(response, soap_version)
             else:
@@ -219,8 +218,7 @@ class OseoServer(object):
         return result, status_code, response_headers
 
     def authenticate_request(self, request_element, soap_version):
-        """
-        Authenticate an OSEO request.
+        """Authenticate an OSEO request.
 
         Verify that the incoming request is made by a valid user.
         PyOSEO uses SOAP-WSS UsernameToken Profile v1.0 authentication. The
@@ -329,30 +327,8 @@ class OseoServer(object):
             result = exception_report.toxml(encoding=self.ENCODING)
         return result
 
-    def _is_soap(self, request_element):
-        """
-        Look for SOAP requests.
-
-        Although the OSEO spec states that SOAP v1.2 is to be used, pyoseo
-        accepts both SOAP v1.1 and SOAP v1.2
-
-        :arg request_element: the raw input request
-        :type request_element: lxml.etree.Element instance
-        """
-
-        ns, tag = request_element.tag.split('}')
-        ns = ns[1:]
-        result = None
-        if tag == 'Envelope':
-            if ns == self._namespaces['soap']:
-                result = '1.2'
-            elif ns == self._namespaces['soap1.1']:
-                result = '1.1'
-        return result
-
     def parse_xml(self, xml):
-        """
-        Parse the input XML request and return a valid PyXB object
+        """Parse the input XML request and return a valid PyXB object.
 
         :arg xml: the XML element with the request
         :xml type: lxml.etree.Element
@@ -363,6 +339,168 @@ class OseoServer(object):
                                   pretty_print=True)
         oseo_request = oseo.CreateFromDocument(document)
         return oseo_request
+
+    def dispatch_product_order(self, order, force=False):
+        """Dispatch a product order for processing in the async queue.
+
+        :arg order: the order to be dispatched
+        :type order: models.Order
+        :arg force: Should the order be dispatched even if it has not been
+        moderated?
+        :type force: bool
+        """
+
+        if force:
+            order.status = models.CustomizableItem.ACCEPTED
+        if order.status == models.CustomizableItem.ACCEPTED:
+            logger.debug("Sending order {} to processing queue...".format(
+                order.id))
+            tasks.process_product_order.apply_async((order.id,))
+
+    def dispatch_subscription_order(self, order, timeslot, collection):
+        """Create a new subscription batch and send it to the processing queue.
+
+        :param timeslot:
+        :param collection:
+        :type collection: list(models.Collection)
+        :return:
+        """
+
+        batch, created = models.SubscriptionBatch.objects.get_or_create(
+            collection=collection, timeslot=timeslot)
+        if created:
+            batch.order = order
+            processor, params = utilities.get_processor(
+                order.order_type,
+                models.ItemProcessor.PROCESSING_PROCESS_ITEM,
+                logger_type="pyoseo"
+            )
+            identifiers = processor.get_subscription_batch_identifiers(
+                timeslot, collection, **params)
+            spec = order.batches.first()
+            new_order_items = self._clone_subscription_batch(
+                identifiers, spec, timeslot, collection)
+            for item in new_order_items:
+                item.reference = "{}_{}_{}".format(order.reference, batch.id,
+                                                   item.identifier)
+                item.batch = batch
+                item.save()
+            batch.save()
+            order.save()
+        tasks.process_batch.apply_async(
+            (batch.id,), {"update_order_status": False})
+
+    def process_subscription_orders(self, timeslot, collections=None):
+        """Process subscriptions for the input timeslot
+
+        :param timeslot:
+        :type timeslot: datetime.datetime
+        :param collections: A list with the names of the collections to
+            process. The default value of None causes all available collections
+            to be processed.
+        :type collections: [models.Collection] or None
+        :return:
+        """
+
+        ok = models.CustomizableItem.ACCEPTED
+        for order in models.SubscriptionOrder.objects.filter(status=ok):
+            if collections is None:
+                batch = order.batches.first()
+                cols = [oi.collection for oi in batch.order_items.all()]
+            else:
+                cols = []
+                for c in collections:
+                    cols.append(models.Collection.objects.get(name=c))
+            for c in cols:
+                self.dispatch_subscription_order(order, timeslot, c)
+
+    def process_product_orders(self):
+        for order in models.ProductOrder.objects.filter(
+                status=models.CustomizableItem.ACCEPTED):
+            self.dispatch_product_order(order)
+
+    def reprocess_order(self, order_id, **kwargs):
+        order = models.Order.objects.get(id=order_id)
+        if order.order_type.name == models.Order.PRODUCT_ORDER:
+            self.dispatch_product_order(order, force=True)
+        elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
+            self.dispatch_subscription_order(order, kwargs["timeslot"],
+                                             kwargs["collection"])
+        else:
+            raise ValueError("Invalid order type: {}".format(
+                order.order_type.name))
+
+    def moderate_order(self, order, approved):
+        """
+        Decide on approval of an order.
+
+        The OSEO standard does not really define any moderation workflow
+        for orders. As such, none of the defined statuses fits exactly with
+        this process. We are abusing the CANCELLED status for this.
+
+        :param order:
+        :param approved:
+        :return:
+        """
+
+        rejection_details = ("Order request has been rejected by the "
+                             "administrators")
+        if order.order_type.name == models.Order.PRODUCT_ORDER:
+            self._moderate_request(
+                order,
+                approved,
+                acceptance_details="Order has been approved and is waiting "
+                                   "in the processing queue",
+                rejection_details=rejection_details
+            )
+            self.dispatch_product_order(order)
+        elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
+            self._moderate_request(
+                order,
+                approved,
+                acceptance_details="Subscription has been approved and will "
+                                   "be processed when new products become "
+                                   "available",
+                rejection_details=rejection_details
+            )
+
+    def _clone_subscription_batch(self, order_item_identifiers,
+                                  subscription_spec_batch, timeslot,
+                                  collection):
+        try:
+            col_item = subscription_spec_batch.order_items.get(
+                collection=collection)
+            col_item_options = col_item.selected_options.all()
+            col_item_scene_options = \
+                col_item.selected_scene_selection_options.all()
+            try:
+                col_item_payment_option = col_item.selected_payment_option
+            except models.SelectedPaymentOption.DoesNotExist:
+                col_item_payment_option = None
+            try:
+                col_item_delivery_option = col_item.selected_delivery_option
+            except models.SelectedDeliveryOption.DoesNotExist:
+                col_item_delivery_option = None
+        except models.Collection.DoesNotExist:
+            raise errors.InvalidCollectionError
+        # django way of cloning model instances is to set the pk and id to None
+        new_items = []
+        for ident in order_item_identifiers:
+            new_item = col_item
+            new_item.pk = None
+            new_item.id = None
+            new_item.identifier = ident
+            new_item.save()
+            new_item.selected_options = col_item_options
+            new_item.selected_scene_selection_options = col_item_scene_options
+            if col_item_payment_option is not None:
+                new_item.selected_payment_option = col_item_payment_option
+            if col_item_delivery_option is not None:
+                new_item.selected_delivery_option = col_item_delivery_option
+            new_item.status = models.CustomizableItem.ACCEPTED
+            new_item.additional_status_info = ""
+            new_items.append(new_item)
+        return new_items
 
     def _get_operation(self, pyxb_request):
         oseo_op = pyxb_request.toDOM().firstChild.tagName.partition(":")[-1]
@@ -385,6 +523,37 @@ class OseoServer(object):
             path = '/soap1.1:Envelope/soap1.1:Body/*[1]'
         xml_element = element.xpath(path, namespaces=self._namespaces)
         return xml_element[0]
+
+    def _is_soap(self, request_element):
+        """
+        Look for SOAP requests.
+
+        Although the OSEO spec states that SOAP v1.2 is to be used, pyoseo
+        accepts both SOAP v1.1 and SOAP v1.2
+
+        :arg request_element: the raw input request
+        :type request_element: lxml.etree.Element instance
+        """
+
+        ns, tag = request_element.tag.split('}')
+        ns = ns[1:]
+        result = None
+        if tag == 'Envelope':
+            if ns == self._namespaces['soap']:
+                result = '1.2'
+            elif ns == self._namespaces['soap1.1']:
+                result = '1.1'
+        return result
+
+    def _moderate_request(self, order, approved, acceptance_details="",
+                          rejection_details=""):
+        if approved:
+            order.status = models.CustomizableItem.ACCEPTED
+            order.additional_status_info = acceptance_details
+        else:
+            order.status = models.CustomizableItem.CANCELLED
+            order.additional_status_info = rejection_details
+        order.save()
 
     def _wrap_soap(self, response, soap_version):
         """
@@ -469,175 +638,3 @@ class OseoServer(object):
             detail.append(exception_element)
         return etree.tostring(soap_env, encoding=self.ENCODING,
                               pretty_print=True)
-
-    def dispatch_order(self, order, force=False, **kwargs):
-        """Dispatch an order for processing in the async queue."""
-
-        if force:
-            order.status = models.CustomizableItem.ACCEPTED
-        if order.status == models.CustomizableItem.SUBMITTED:
-            utilities.send_moderation_email(order)
-        elif order.status == models.CustomizableItem.ACCEPTED:
-            logger.debug("Sending order {} to processing queue...".format(
-                order.id))
-            if order.order_type.name == models.Order.PRODUCT_ORDER:
-                self._dispatch_product_order(order)
-            elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
-                self._dispatch_subscription_order(order, kwargs["timeslot"],
-                                                  kwargs["collection"])
-        elif order.status == models.CustomizableItem.CANCELLED:
-            logger.warning("Order {} is cancelled. Dispatching "
-                           "anyway...".format(order.id))
-
-    def _dispatch_product_order(self, order):
-        tasks.process_product_order.apply_async((order.id,))
-
-    def _clone_subscription_batch(self, order_item_identifiers,
-                                  subscription_spec_batch, timeslot,
-                                  collection):
-        try:
-            col_item = subscription_spec_batch.order_items.get(
-                collection=collection)
-            col_item_options = col_item.selected_options.all()
-            col_item_scene_options = \
-                col_item.selected_scene_selection_options.all()
-            try:
-                col_item_payment_option = col_item.selected_payment_option
-            except models.SelectedPaymentOption.DoesNotExist:
-                col_item_payment_option = None
-            try:
-                col_item_delivery_option = col_item.selected_delivery_option
-            except models.SelectedDeliveryOption.DoesNotExist:
-                col_item_delivery_option = None
-        except models.Collection.DoesNotExist:
-            raise errors.InvalidCollectionError
-        # django way of cloning model instances is to set the pk and id to None
-        new_items = []
-        for ident in order_item_identifiers:
-            new_item = col_item
-            new_item.pk = None
-            new_item.id = None
-            new_item.identifier = ident
-            new_item.save()
-            new_item.selected_options = col_item_options
-            new_item.selected_scene_selection_options = col_item_scene_options
-            if col_item_payment_option is not None:
-                new_item.selected_payment_option = col_item_payment_option
-            if col_item_delivery_option is not None:
-                new_item.selected_delivery_option = col_item_delivery_option
-            new_item.status = models.CustomizableItem.ACCEPTED
-            new_item.additional_status_info = ""
-            new_items.append(new_item)
-        return new_items
-
-    def _dispatch_subscription_order(self, order, timeslot, collection):
-        """
-        Create a new subscription batch and send it to the processing queue.
-
-        :param timeslot:
-        :param collection:
-        :type collection: list(models.Collection)
-        :return:
-        """
-
-        batch, created = models.SubscriptionBatch.objects.get_or_create(
-            collection=collection, timeslot=timeslot)
-        if created:
-            batch.order = order
-            processor, params = utilities.get_processor(
-                order.order_type,
-                models.ItemProcessor.PROCESSING_PROCESS_ITEM,
-                logger_type="pyoseo"
-            )
-            identifiers = processor.get_subscription_batch_identifiers(
-                timeslot, collection, **params)
-            spec = order.batches.first()
-            new_order_items = self._clone_subscription_batch(
-                identifiers, spec, timeslot, collection)
-            for item in new_order_items:
-                item.reference = "{}_{}_{}".format(order.reference, batch.id,
-                                                   item.identifier)
-                item.batch = batch
-                item.save()
-            batch.save()
-            order.save()
-        else:
-            pass
-        #tasks.process_product_order_batch.apply_async((batch.id,))
-
-    def process_subscription_orders(self, current_timeslot, collections=None):
-        """
-        Process subscriptions for the input timeslot
-
-        :param current_timeslot:
-        :param collections: A list with the names of the collections to
-            process. The default value of None causes all available
-            collections to be processed
-        :type collections:
-        :return:
-        """
-
-        ok = models.CustomizableItem.ACCEPTED
-        for order in models.SubscriptionOrder.objects.filter(status=ok):
-            if collections is None:
-                batch = order.batches.first()
-                cols = [oi.collection for oi in batch.order_items.all()]
-            else:
-                cols = []
-                for c in collections:
-                    cols.append(models.Collection.objects.get(name=c))
-            for c in cols:
-                self._dispatch_subscription_order(order, current_timeslot, c)
-
-    def process_product_orders(self):
-        for order in models.ProductOrder.objects.filter(
-                status=models.CustomizableItem.ACCEPTED):
-            self.dispatch_order(order)
-
-    def reprocess_order(self, order_id, **kwargs):
-        order = models.Order.objects.get(id=order_id)
-        self.dispatch_order(order, force=True, **kwargs)
-
-    def moderate_order(self, order, approved):
-        """
-        Decide on approval of an order.
-
-        The OSEO standard does not really define any moderation workflow
-        for orders. As such, none of the defined statuses fits exactly with
-        this process. We are abusing the CANCELLED status for this.
-
-        :param order:
-        :param approved:
-        :return:
-        """
-
-        rejection_details = ("Order request has been rejected by the "
-                             "administrators")
-        if order.order_type.name == models.Order.PRODUCT_ORDER:
-            self._moderate_request(
-                order,
-                approved,
-                acceptance_details="Order has been approved and is waiting "
-                                   "in the processing queue",
-                rejection_details=rejection_details
-            )
-            self.dispatch_order(order)
-        elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
-            self._moderate_request(
-                order,
-                approved,
-                acceptance_details="Subscription has been approved and will "
-                                   "be processed when new products become "
-                                   "available",
-                rejection_details=rejection_details
-            )
-
-    def _moderate_request(self, order, approved, acceptance_details="",
-                          rejection_details=""):
-        if approved:
-            order.status = models.CustomizableItem.ACCEPTED
-            order.additional_status_info = acceptance_details
-        else:
-            order.status = models.CustomizableItem.CANCELLED
-            order.additional_status_info = rejection_details
-        order.save()
