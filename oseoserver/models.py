@@ -24,9 +24,12 @@ from django.conf import settings
 from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.models import User
+import pyxb
+import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 import managers
 import errors
+from utilities import _n
 
 
 class AbstractDeliveryAddress(models.Model):
@@ -44,6 +47,22 @@ class AbstractDeliveryAddress(models.Model):
 
     class Meta:
         abstract = True
+
+    def create_oseo_delivery_address(self):
+        delivery_address = oseo.DeliveryAddressType()
+        delivery_address.firstName = _n(self.first_name)
+        delivery_address.lastName = _n(self.last_name)
+        delivery_address.companyRef = _n(self.company_ref)
+        delivery_address.postalAddress=pyxb.BIND()
+        delivery_address.postalAddress.streetAddress = _n(self.street_address)
+        delivery_address.postalAddress.city = _n(self.city)
+        delivery_address.postalAddress.state = _n(self.state)
+        delivery_address.postalAddress.postalCode = _n(self.postal_code)
+        delivery_address.postalAddress.country = _n(self.country)
+        delivery_address.postalAddress.postBox = _n(self.post_box)
+        delivery_address.telephoneNumber = _n(self.telephone)
+        delivery_address.facsimileTelephoneNumber = _n(self.fax)
+        return delivery_address
 
 
 class AbstractOption(models.Model):
@@ -158,6 +177,12 @@ class Batch(models.Model):
         item.save()
         return item
 
+    def create_oseo_items_status(self):
+        items_status = []
+        for i in self.order_items.all():
+            items_status.append(i.create_oseo_status_item_type())
+        return items_status
+
     class Meta:
         verbose_name_plural = "batches"
 
@@ -267,9 +292,73 @@ class CustomizableItem(models.Model):
             instance = OrderItem.objects.get(id=self.id)
         return instance.__unicode__()
 
+    def create_oseo_delivery_options(self):
+        """
+        Create an OSEO DeliveryOptionsType
+
+        :arg db_item: the database record model that has the delivery options
+        :type db_item: pyoseo.models.CustomizableItem
+        :return: A pyxb object with the delivery options
+        """
+
+        try:
+            do = self.selected_delivery_option
+            dot = oseo.DeliveryOptionsType()
+            try:
+                oda = do.option.onlinedataaccess
+                dot.onlineDataAccess = pyxb.BIND()
+                dot.onlineDataAccess.protocol = oda.protocol
+            except OnlineDataAccess.DoesNotExist:
+                try:
+                    odd = do.option.onlinedatadelivery
+                    dot.onlineDataDelivery = pyxb.BIND()
+                    dot.onlineDataDelivery.protocol = odd.protocol
+                except OnlineDataDelivery.DoesNotExist:
+                    md = do.option.mediadelivery
+                    dot.mediaDelivery = pyxb.BIND()
+                    dot.mediaDelivery.packageMedium = md.package_medium
+                    dot.mediaDelivery.shippingInstructions = _n(
+                        md.shipping_instructions)
+            dot.numberOfCopies = _n(do.copies)
+            dot.productAnnotation = _n(do.annotation)
+            dot.specialInstructions = _n(do.special_instructions)
+        except SelectedDeliveryOption.DoesNotExist:
+            dot = None
+        return dot
+
 
 class DeliveryInformation(AbstractDeliveryAddress):
     order = models.OneToOneField("Order", related_name="delivery_information")
+
+    def create_oseo_delivery_information(self):
+        """Create an OSEO DeliveryInformationType"""
+        del_info = oseo.DeliveryInformationType()
+        optional_attrs = [self.first_name, self.last_name, self.company_ref,
+                          self.street_address, self.city, self.state,
+                          self.postal_code, self.country, self.post_box,
+                          self.telephone, self.fax]
+        if any(optional_attrs):
+            del_info.mailAddress = oseo.DeliveryAddressType()
+            del_info.mailAddress.firstName = _n(self.first_name)
+            del_info.mailAddress.lastName = _n(self.last_name)
+            del_info.mailAddress.companyRef = _n(self.company_ref)
+            del_info.mailAddress.postalAddress = pyxb.BIND()
+            del_info.mailAddress.postalAddress.streetAddress = _n(self.street_address)
+            del_info.mailAddress.postalAddress.city = _n(self.city)
+            del_info.mailAddress.postalAddress.state = _n(self.state)
+            del_info.mailAddress.postalAddress.postalCode = _n(self.postal_code)
+            del_info.mailAddress.postalAddress.country = _n(self.country)
+            del_info.mailAddress.postalAddress.postBox = _n(self.post_box)
+            del_info.mailAddress.telephoneNumber = _n(self.telephone)
+            del_info.mailAddress.facsimileTelephoneNumber = _n(self.fax)
+        for oa in self.onlineaddress_set.all():
+            del_info.onlineAddress.append(oseo.OnlineAddressType())
+            del_info.onlineAddress[-1].protocol = oa.protocol
+            del_info.onlineAddress[-1].serverAddress = oa.server_address
+            del_info.onlineAddress[-1].userName = _n(oa.user_name)
+            del_info.onlineAddress[-1].userPassword = _n(oa.user_password)
+            del_info.onlineAddress[-1].path = _n(oa.path)
+        return del_info
 
 
 class DeliveryOption(models.Model):
@@ -505,6 +594,7 @@ class TaskingOrderConfiguration(OrderConfiguration):
 
 
 class Order(CustomizableItem):
+    MASSIVE_ORDER_REFERENCE = 'Massive order'
     MAX_ORDER_ITEMS = getattr(settings, "MAX_ORDER_ITEMS", 200)
     PRODUCT_ORDER = 'PRODUCT_ORDER'
     SUBSCRIPTION_ORDER = 'SUBSCRIPTION_ORDER'
@@ -525,6 +615,8 @@ class Order(CustomizableItem):
         (FINAL, FINAL),
         (ALL, ALL),
     )
+    BRIEF_PRESENTATION = "brief"
+    FULL_PRESENTATION = "full"
     user = models.ForeignKey("OseoUser", related_name="orders")
     order_type = models.ForeignKey("OrderType", related_name="orders")
     last_describe_result_access_request = models.DateTimeField(null=True,
@@ -556,6 +648,49 @@ class Order(CustomizableItem):
                                     oi)
         self.batches.add(batch)
         return batch
+
+    def create_oseo_order_monitor(self, presentation=BRIEF_PRESENTATION):
+        om = oseo.CommonOrderMonitorSpecification()
+        if self.order_type.name == self.MASSIVE_ORDER:
+            om.orderType = self.PRODUCT_ORDER
+            om.orderReference = self.MASSIVE_ORDER_REFERENCE
+        else:
+            om.orderType = self.order_type.name
+            om.orderReference = _n(self.reference)
+        om.orderId = str(self.id)
+        om.orderStatusInfo = oseo.StatusType(
+            status=self.status,
+            additionalStatusInfo=_n(self.additional_status_info),
+            missionSpecificStatusInfo=_n(self.mission_specific_status_info)
+        )
+        om.orderDateTime = self.status_changed_on
+        om.orderRemark = _n(self.remark)
+        try:
+            d = self.delivery_information.create_oseo_delivery_information()
+            om.deliveryInformation = d
+        except DeliveryInformation.DoesNotExist:
+            pass
+        try:
+            om.invoiceAddress = \
+                self.invoice_address.create_oseo_delivery_address()
+        except InvoiceAddress.DoesNotExist:
+            pass
+        om.packaging = _n(self.packaging)
+        # add any 'option' elements
+        om.deliveryOptions = self.create_oseo_delivery_options()
+        om.priority = _n(self.priority)
+        if presentation == self.FULL_PRESENTATION:
+            if self.order_type.name == self.PRODUCT_ORDER:
+                batch = self.batches.get()
+                sits = batch.create_oseo_items_status()
+                om.orderItem.extend(sits)
+            elif self.order_type.name == self.SUBSCRIPTION_ORDER:
+                for batch in self.batches.all()[1:]:
+                    sits = batch.create_oseo_items_status()
+                    om.orderItem.extend(sits)
+            else:
+                raise NotImplementedError
+        return om
 
 
     def __unicode__(self):
@@ -684,6 +819,34 @@ class OrderItem(CustomizableItem):
         else:  # media delivery
             valid_delivery["delivery_type"] = "mediadelivery"
         return valid_delivery
+
+    def create_oseo_status_item_type(self):
+        """
+        Create a CommonOrderStatusItemType element
+        :return:
+        """
+        sit = oseo.CommonOrderStatusItemType()
+        # TODO - add the other optional elements
+        sit.itemId = str(self.item_id)
+        # oi.identifier is guaranteed to be non empty for
+        # normal product orders and for subscription batches
+        sit.productId = self.identifier
+        sit.productOrderOptionsId = "Options for {} {}".format(
+            self.collection.name, self.batch.order.order_type.name)
+        sit.orderItemRemark = _n(self.remark)
+        sit.collectionId = _n(self.collection_id)
+        # add any 'option' elements that may be present
+        # add any 'sceneSelection' elements that may be present
+        sit.deliveryOptions = self.create_oseo_delivery_options()
+        # add any 'payment' elements that may be present
+        # add any 'extension' elements that may be present
+        sit.orderItemStatusInfo = oseo.StatusType()
+        sit.orderItemStatusInfo.status = self.status
+        sit.orderItemStatusInfo.additionalStatusInfo = \
+            _n(self.additional_status_info)
+        sit.orderItemStatusInfo.missionSpecificStatusInfo= \
+            _n(self.mission_specific_status_info)
+        return sit
 
     def __unicode__(self):
         return str(self.item_id)

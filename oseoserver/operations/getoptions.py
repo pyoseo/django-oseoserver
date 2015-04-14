@@ -24,8 +24,10 @@ import pyxb.bundles.opengis.swe_2_0 as swe
 
 from oseoserver import models
 from oseoserver import errors
+from oseoserver.utilities import _n
 from oseoserver.operations.base import OseoOperation
 
+# TODO - Implement retrieval of options for subscription orders
 class GetOptions(OseoOperation):
 
     def __call__(self, request, user, **kwargs):
@@ -64,16 +66,14 @@ class GetOptions(OseoOperation):
 
         status_code = 200
         if any(request.identifier):  # product identifier query
+            # retrieve the products from the catalogue using the identifier
+            # assess their collection and return the collection options
             raise NotImplementedError
         elif request.collectionId is not None:  # product or collection query
             try:
-                p = models.Product.objects.get(
-                        collection_id=request.collectionId)
+                collection = models.Collection.objects.get(
+                    collection_id=request.collectionId)
                 response = oseo.GetOptionsResponse(status='success')
-                # get the options that are available for the requested
-                # collection and which available for each type of order
-                # this includes options that are specific to each collection
-                # as well as options that are applicable to every collection
                 for ot in (models.OrderType.PRODUCT_ORDER,
                            models.OrderType.SUBSCRIPTION_ORDER):
                     available_options = self.get_applicable_options(
@@ -92,93 +92,97 @@ class GetOptions(OseoOperation):
                         )
                         response.orderOptions.append(order_opts)
             except ObjectDoesNotExist:
-                raise errors.OseoError('UnsupportedCollection',
-                                       'Subscription not supported',
-                                       locator=request.collectionId)
+                raise errors.InvalidCollectionError()
         elif request.taskingRequestId is not None:
             raise NotImplementedError
         return response, status_code
 
-    def get_applicable_options(self, collection_id, request_type):
+    def create_oseo_order_options_product(self, collection, user):
+        order_type = models.Order.PRODUCT_ORDER
+        group = user.oseo_group
+        if group.collection_set.filter(id=collection.id).exists():
+            oc = collection.productorderconfiguration.orderconfiguration_ptr
+            if oc.enabled:
+                options_id = "{} {}".format(order_type, collection.name)
+                description = ("Options for submitting orders of type {} for "
+                               "the {} collection".format(order_type,
+                                                          collection.name))
+                oo = oseo.CommonOrderOptionsType(
+                    productOrderOptionsId=options_id,
+                    description=description,
+                    orderType=order_type
+                )
+                access, delivery, package = self._extract_delivery_options(oc)
+                if any(access):
+                    self._create_delivery_options_element(
+                        oo, "online_data_access", access)
+                if any(delivery):
+                    self._create_delivery_options_element(
+                        oo, "online_data_delivery",
+                        delivery
+                    )
+                if any(package):
+                    self._create_delivery_options_element(oo, "media_delivery",
+                                                          package)
+                # implement paymentOptions
+                # implement sceneSelectionOptions
+            else:
+                # this collection does not allow product orders
+                raise errors.InvalidCollectionError
+        else:
+            # the collection cannot be ordered by this user
+            raise errors.InvalidCollectionError
 
-        options = models.Option.objects.filter(
-            Q(product__collection_id=collection_id) |
-            Q(product=None)
-        ).filter(optionordertype__order_type__name=request_type)
-        return options
+    def _extract_delivery_options(self, order_configuration):
+        data_access = []
+        data_delivery = []
+        package_media = []
+        for del_opt in order_configuration.delivery_options.all():
+            try:
+                p = del_opt.onlinedataaccess.protocol
+                data_access.append(p)
+            except models.OnlineDataAccess.DoesNotExist:
+                try:
+                    p = del_opt.onlinedatadelivery.protocol
+                    data_delivery.append(p)
+                except models.OnlineDataDelivery.DoesNotExist:
+                    m = del_opt.mediadelivery.package_medium
+                    package_media.append(m)
+        return data_access, data_delivery, package_media
 
-    def _get_order_options(self, option_group, options, delivery_options,
-                           order_type, order_item=None):
-        """
-        :arg option_group:
-        :type option_group:
-        :arg options:
-        :type options: A list of models.Option objects
-        :arg delivery_options:
-        :type delivery_options: A list of models.DeliveryOption objects
-        :arg order_type: The type of order, which can be one of the types
-                         defined in the models.OrderType class
-        :type order_type: string
-        :arg order_item:
-        :type order_item:
-        :return: The pyxb oseo.CommonOrderOptionsType
-        """
+    def _create_delivery_options_element(self, common_order_options_element,
+                                         delivery_option, contents):
+        p = common_order_options_element.productDeliveryOptions
+        if delivery_option == "online_data_acess":
+            p.append(pyxb.BIND(onlineDataAccess=pyxb.BIND()))
+            for item in contents:
+                p[-1].onlineDataAccess.append(oseo.ProtocolType(item))
+        elif delivery_option == "online_data_delivery":
+            p.append(pyxb.BIND(onlineDataDelivery=pyxb.BIND()))
+            for item in contents:
+                p[-1].onlineDataDelivery.append(oseo.ProtocolType(item))
+        elif delivery_option == "media_delivery":
+            p.append(pyxb.BIND(mediaDelivery=pyxb.BIND()))
+            for item in contents:
+                p[-1].mediaDelivery.append(oseo.PackageMedium(item))
 
-        c = oseo.CommonOrderOptionsType()
-        c.productOrderOptionsId = option_group.name
-        if order_item is not None:
-            c.identifier = order_item.identifier
-        c.description = self._n(option_group.description)
-        c.orderType = order_type
-        for option in options:
-            dr = swe.DataRecord()
-            dr.field.append(pyxb.BIND())
-            dr.field[0].name = option.name
-            cat = swe.Category(updatable=False)
-            cat.optional = True
-            #cat.definition = 'http://geoland2.meteo.pt/ordering/def/%s' % \
-            #        option.name
-            #cat.identifier = option.name
-            #cat.description = self._n(option.description)
-            choices = option.choices.all()
-            if any(choices):
-                cat.constraint = pyxb.BIND()
-                at = swe.AllowedTokens()
-                for choice in choices:
-                    at.value_.append(choice.value)
-                cat.constraint.append(at)
-            dr.field[0].append(cat)
-            c.option.append(pyxb.BIND())
-            c.option[-1].AbstractDataComponent = dr
-            #c.option[-1].grouping = 'teste'
-        online_data_access_opts = [d for d in delivery_options if \
-                hasattr(d, 'onlinedataaccess')]
-        online_data_delivery_opts = [d for d in delivery_options if \
-                hasattr(d, 'onlinedatadelivery')]
-        media_delivery_opts = [d for d in delivery_options if \
-                hasattr(d, 'mediadelivery')]
-        if any(online_data_access_opts):
-            c.productDeliveryOptions.append(pyxb.BIND())
-            i = len(c.productDeliveryOptions) - 1
-            c.productDeliveryOptions[i].onlineDataAccess = pyxb.BIND()
-            for opt in online_data_access_opts:
-                c.productDeliveryOptions[i].onlineDataAccess.protocol.append(
-                        opt.onlinedataaccess.protocol)
-        if any(online_data_delivery_opts):
-            c.productDeliveryOptions.append(pyxb.BIND())
-            i = len(c.productDeliveryOptions) - 1
-            c.productDeliveryOptions[i].onlineDataDelivery = pyxb.BIND()
-            for opt in online_data_delivery_opts:
-                c.productDeliveryOptions[i].onlineDataDelivery.protocol.append(
-                        opt.onlinedatadelivery.protocol)
-        if any(media_delivery_opts):
-            c.productDeliveryOptions.append(pyxb.BIND())
-            i = len(c.productDeliveryOptions) - 1
-            c.productDeliveryOptions[i].mediaDelivery = pyxb.BIND()
-            for opt in media_delivery_opts:
-                c.productDeliveryOptions[i].mediaDelivery.packageMedium.append(
-                        opt.mediadelivery.package_medium)
-        # add orderOptionInfoURL
-        # add paymentOptions
-        # add sceneSelecetionOptions
-        return c
+    def _create_swe_data_record(self, option):
+        dr = swe.DataRecord()
+        dr.field.append(pyxb.BIND())
+        dr.field[0].name = option.name
+        cat = swe.Category(updatable=False)
+        cat.optional = True
+        #cat.definition = 'http://geoland2.meteo.pt/ordering/def/%s' % \
+        #        option.name
+        #cat.identifier = option.name
+        #cat.description = _n(option.description)
+        choices = option.choices.all()
+        if any(choices):
+            cat.constraint = pyxb.BIND()
+            at = swe.AllowedTokens()
+            for choice in choices:
+                at.value_.append(choice.value)
+            cat.constraint.append(at)
+        dr.field[0].append(cat)
+        return dr
+

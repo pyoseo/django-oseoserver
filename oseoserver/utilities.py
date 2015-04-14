@@ -125,3 +125,22 @@ def send_email(subject, message, recipients):
         )
         msg.save()
 
+def _c(value):
+    """
+    Convert between a None and an empty string.
+
+    This function translates pyxb's empty elements, which are stored as
+    None into django's empty values, which are stored as an empty string.
+    """
+
+    return '' if value is None else str(value)
+
+def _n(value):
+    """
+    Convert between an empty string and a None
+
+    This function is translates django's empty elements, which are stored
+    as empty strings into pyxb empty elements, which are stored as None.
+    """
+
+    return None if value == '' else value

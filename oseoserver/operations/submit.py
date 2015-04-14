@@ -16,13 +16,9 @@
 Implements the OSEO Submit operation
 """
 
-import os
-import stat
 import logging
 
 from django.db import transaction
-from django.core.exceptions import ObjectDoesNotExist
-from django.conf import settings as django_settings
 from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.csw_2_0_2 as csw
@@ -34,6 +30,7 @@ import requests
 from oseoserver import models
 from oseoserver import errors
 from oseoserver import utilities
+from oseoserver.utilities import _n, _c
 from oseoserver.server import OseoServer
 from oseoserver.operations.base import OseoOperation
 
@@ -67,7 +64,7 @@ class Submit(OseoOperation):
         else:
             raise errors.SubmitWithQuotationError('Submit with quotationId is '
                                                   'not implemented.')
-        # raise an error if there are no delivery options on the
+        # TODO - raise an error if there are no delivery options on the
         # order_specification either at the order or order item levels
         default_status = models.Order.SUBMITTED
         additional_status_info = ("Order is awaiting approval")
@@ -82,7 +79,7 @@ class Submit(OseoOperation):
                                   item_additional_status_info)
         response = oseo.SubmitAck(status='success')
         response.orderId = str(order.id)
-        response.orderReference = self._n(order.reference)
+        response.orderReference = _n(order.reference)
         return response, status_code, order
 
     def process_order_specification(self, order_specification, user):
@@ -111,11 +108,11 @@ class Submit(OseoOperation):
             order_config = self._get_order_configuration(
                 col, spec["order_type"])
             spec["requested_order_configurations"].append(order_config)
-        spec["order_reference"] = self._c(order_specification.orderReference)
-        spec["order_remark"] = self._c(order_specification.orderRemark)
+        spec["order_reference"] = _c(order_specification.orderReference)
+        spec["order_remark"] = _c(order_specification.orderRemark)
         spec["packaging"] = self._validate_packaging(
             order_specification.packaging)
-        spec["priority"] = self._c(order_specification.priority)
+        spec["priority"] = _c(order_specification.priority)
         spec["delivery_information"] = self.get_delivery_information(
             order_specification.deliveryInformation)
         spec["invoice_address"] = self.get_invoice_address(
@@ -210,12 +207,11 @@ class Submit(OseoOperation):
                 info["online_address"] = []
                 for online_address in requested_online_info:
                     info["online_address"].append({
-                        "protocol": self._c(online_address.protocol),
-                        "server_address": self._c(
-                            online_address.serverAddress),
-                        "user_name": self._c(online_address.userName),
-                        "user_password": self._c(online_address.userPassword),
-                        "path": self._c(online_address.path),
+                        "protocol": _c(online_address.protocol),
+                        "server_address": _c(online_address.serverAddress),
+                        "user_name": _c(online_address.userName),
+                        "user_password": _c(online_address.userPassword),
+                        "path": _c(online_address.path),
                     })
         else:
             info = None
@@ -230,24 +226,22 @@ class Submit(OseoOperation):
 
     def _get_delivery_address(self, delivery_address_type):
         address = {
-            "first_name": self._c(delivery_address_type.firstName),
-            "last_name": self._c(delivery_address_type.lastName),
-            "company_ref": self._c(delivery_address_type.companyRef),
-            "telephone_number": self._c(
-                delivery_address_type.telephoneNumber),
-            "facsimile_telephone_number": self._c(
+            "first_name": _c(delivery_address_type.firstName),
+            "last_name": _c(delivery_address_type.lastName),
+            "company_ref": _c(delivery_address_type.companyRef),
+            "telephone_number": _c(delivery_address_type.telephoneNumber),
+            "facsimile_telephone_number": _c(
                 delivery_address_type.facsimileTelephoneNumber),
         }
         postal_address = delivery_address_type.postalAddress
         if postal_address is not None:
             address["postal_address"] = {
-                "street_address": self._c(
-                    postal_address.streetAddress),
-                "city": self._c(postal_address.city),
-                "state": self._c(postal_address.state),
-                "postal_code": self._c(postal_address.postalCode),
-                "country": self._c(postal_address.country),
-                "post_box": self._c(postal_address.postBox),
+                "street_address": _c(postal_address.streetAddress),
+                "city": _c(postal_address.city),
+                "state": _c(postal_address.state),
+                "postal_code": _c(postal_address.postalCode),
+                "country": _c(postal_address.country),
+                "post_box": _c(postal_address.postBox),
                 }
         return address
 
@@ -315,9 +309,9 @@ class Submit(OseoOperation):
 
         item = {
             "item_id": requested_item.itemId,
-            "product_order_options_id": self._c(
+            "product_order_options_id": _c(
                 requested_item.productOrderOptionsId),
-            "order_item_remark": self._c(requested_item.orderItemRemark)
+            "order_item_remark": _c(requested_item.orderItemRemark)
         }
         if order_type.name in (models.Order.PRODUCT_ORDER,
                                models.Order.MASSIVE_ORDER):
@@ -346,7 +340,7 @@ class Submit(OseoOperation):
         return item
 
     def _validate_product_order_item(self, requested_item, user):
-        identifier = self._c(requested_item.productId.identifier)
+        identifier = _c(requested_item.productId.identifier)
         col_id = requested_item.productId.collectionId
         if col_id is None:
             col_id = self.get_collection_id(identifier,
@@ -535,8 +529,8 @@ class Submit(OseoOperation):
                 raise errors.InvalidDeliveryOptionError()
             copies = dop.numberOfCopies
             delivery["copies"] = int(copies) if copies is not None else copies
-            delivery["annotation"] = self._c(dop.productAnnotation)
-            delivery["special_instructions"] = self._c(dop.specialInstructions)
+            delivery["annotation"] = _c(dop.productAnnotation)
+            delivery["special_instructions"] = _c(dop.specialInstructions)
         return delivery
 
     def _validate_global_delivery_options(self, requested_order_spec,
@@ -578,12 +572,8 @@ class Submit(OseoOperation):
         order_type = models.OrderType.objects.get(
             name=order_specification.orderType)
         if order_type.name == "PRODUCT_ORDER":
-            ref = self._c(order_specification.orderReference)
-            massive_reference = getattr(
-                django_settings,
-                'OSEOSERVER_MASSIVE_ORDER_REFERENCE',
-                None
-            )
+            ref = _c(order_specification.orderReference)
+            massive_reference = models.Order.MASSIVE_ORDER_REFERENCE
             if massive_reference is not None and ref == massive_reference:
                 order_type = models.OrderType.objects.get(
                     name="MASSIVE_ORDER")
@@ -605,7 +595,7 @@ class Submit(OseoOperation):
         return request.statusNotification
 
     def _validate_packaging(self, requested_packaging):
-        packaging = self._c(requested_packaging)
+        packaging = _c(requested_packaging)
         choices = [c[0] for c in models.Order.PACKAGING_CHOICES]
         if packaging != "" and packaging not in choices:
             raise errors.InvalidPackagingError(packaging)

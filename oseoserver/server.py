@@ -72,9 +72,6 @@ class OseoServer(object):
     Clients of this class should use only the process_request method.
     """
 
-    MASSIVE_ORDER_REFERENCE = 'Massive order'
-    """Identifies an order as being a 'massive order'"""
-
     DEFAULT_USER_NAME = 'oseoserver_user'
     """Used for anonymous servers"""
 
@@ -367,7 +364,7 @@ class OseoServer(object):
         """
 
         batch, created = models.SubscriptionBatch.objects.get_or_create(
-            collection=collection, timeslot=timeslot)
+            order=order, collection=collection, timeslot=timeslot)
         if created:
             batch.order = order
             processor, params = utilities.get_processor(
@@ -381,16 +378,19 @@ class OseoServer(object):
             new_order_items = self._clone_subscription_batch(
                 identifiers, spec, timeslot, collection)
             for item in new_order_items:
-                item.reference = "{}_{}_{}".format(order.reference, batch.id,
-                                                   item.identifier)
+                item.item_id = "{}_{}_{}".format(order.reference, batch.id,
+                                                 item.identifier)
                 item.batch = batch
                 item.save()
             batch.save()
             order.save()
         tasks.process_batch.apply_async(
-            (batch.id,), {"update_order_status": False})
+            (batch.id,),
+            {"update_order_status": False, "notify_batch_execution": True}
+        )
 
-    def process_subscription_orders(self, timeslot, collections=None):
+    def process_subscription_orders(self, timeslot, collections=None,
+                                    order_id=None):
         """Process subscriptions for the input timeslot
 
         :param timeslot:
@@ -399,11 +399,18 @@ class OseoServer(object):
             process. The default value of None causes all available collections
             to be processed.
         :type collections: [models.Collection] or None
+        :param order_id: The id of an existing subscription order to process.
+            The default value of None causes the processing of all
+            subscriptions that have been accepted.
+        :type order_id: int or None
         :return:
         """
 
-        ok = models.CustomizableItem.ACCEPTED
-        for order in models.SubscriptionOrder.objects.filter(status=ok):
+        if order_id is None:
+            qs = models.SubscriptionOrder.objects.all()
+        else:
+            qs = models.SubscriptionOrder.objects.filter(id=order_id)
+        for order in qs.filter(status=models.CustomizableItem.ACCEPTED):
             if collections is None:
                 batch = order.batches.first()
                 cols = [oi.collection for oi in batch.order_items.all()]

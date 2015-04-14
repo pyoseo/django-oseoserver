@@ -64,14 +64,16 @@ def process_product_order(self, order_id):
         raise
     g = []
     for batch in order.batches.all():
-        sig = process_batch.subtask((batch.id,))
+        sig = process_batch.subtask((batch.id,),
+                                    {"notify_batch_execution": False})
         g.append(sig)
     job = group(g)
     job.apply_async()
 
 
 @shared_task(bind=True)
-def process_batch(self, batch_id, update_order_status=True):
+def process_batch(self, batch_id, update_order_status=True,
+                  notify_batch_execution=True):
     try:
         batch = models.Batch.objects.get(pk=batch_id)
     except models.Batch.DoesNotExist:
@@ -99,11 +101,14 @@ def process_batch(self, batch_id, update_order_status=True):
         job = chord(header, body)
     else:
         job = group(header)
-    c = chain(
-        job.apply_async(),
-        notify_batch_execution_ended.apply_async((batch_id,), immutable=True)
-    )
-    #job.apply_async()
+    if notify_batch_execution:
+        c = chain(
+            job.apply_async(),
+            notify_batch_execution_ended.apply_async((batch_id,),
+                                                     immutable=True)
+        )
+    else:
+        job.apply_async()
 
 
 @shared_task(bind=True)
