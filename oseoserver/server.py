@@ -44,6 +44,7 @@ that preform each OSEO operation.
 #  pd.toxml()
 
 import logging
+from datetime import datetime
 
 from lxml import etree
 import pyxb.bundles.opengis.oseo_1_0 as oseo
@@ -384,6 +385,11 @@ class OseoServer(object):
                 item.save()
             batch.save()
             order.save()
+        else:
+            for order_item in batch.order_items.all():
+                order_item.files.all().delete()
+            batch.updated_on = datetime.utcnow()
+            batch.save()
         tasks.process_batch.apply_async(
             (batch.id,),
             {"update_order_status": False, "notify_batch_execution": True}

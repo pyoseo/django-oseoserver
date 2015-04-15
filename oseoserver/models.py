@@ -84,6 +84,10 @@ class AbstractOptionChoice(models.Model):
 
 
 class Batch(models.Model):
+    # subFunction values for DescribeResultAccess operation
+    ALL_READY = "allReady"
+    NEXT_READY = "nextReady"
+
     order = models.ForeignKey("Order", null=True, related_name="batches")
     created_on = models.DateTimeField(auto_now_add=True)
     completed_on = models.DateTimeField(null=True, blank=True)
@@ -182,6 +186,43 @@ class Batch(models.Model):
         for i in self.order_items.all():
             items_status.append(i.create_oseo_status_item_type())
         return items_status
+
+    def get_completed_files(self, behaviour):
+        order = self.order
+        last_time = order.last_describe_result_access_request
+        order_delivery = order.selected_delivery_option.option
+        completed = []
+        if self.status() != CustomizableItem.COMPLETED:
+            # batch is either still being processed,
+            # failed or already downloaded, so we don't care for it
+            pass
+        else:
+            batch_complete_items = []
+            order_items = self.order_items.all()
+            for oi in order_items:
+                try:
+                    delivery = oi.selected_delivery_option.option
+                except SelectedDeliveryOption.DoesNotExist:
+                    delivery = order_delivery
+                if not hasattr(delivery, "onlinedataaccess"):
+                    # getStatus only applies to items with onlinedataaccess
+                    continue
+                if oi.status == CustomizableItem.COMPLETED:
+                    if (last_time is None or behaviour == self.ALL_READY) or \
+                            (behaviour == self.NEXT_READY and
+                                     oi.completed_on >= last_time):
+                        for f in oi.files.filter(available=True):
+                            batch_complete_items.append((f, delivery))
+            if order.packaging == Order.ZIP:
+                if len(batch_complete_items) == len(order_items):
+                    # the zip is ready, lets get only a single file
+                    # because they all point to the same URL
+                    completed.append(batch_complete_items[0])
+                else:  # the zip is not ready yet
+                    pass
+            else:  # lets get each file that is complete
+                completed = batch_complete_items
+        return completed
 
     class Meta:
         verbose_name_plural = "batches"

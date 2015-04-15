@@ -16,13 +16,10 @@
 Implements the OSEO DescribeResultAccess operation
 """
 
-import os
 import logging
 import datetime as dt
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.core.urlresolvers import reverse
-from django.conf import settings as django_settings
 import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
@@ -33,10 +30,6 @@ from oseoserver.operations.base import OseoOperation
 logger = logging.getLogger('.'.join(('pyoseo', __name__)))
 
 class DescribeResultAccess(OseoOperation):
-
-    # subFunction values for DescribeResultAccess operation
-    ALL_READY = 'allReady'
-    NEXT_READY = 'nextReady'
 
     def __call__(self, request, user, **kwargs):
         """
@@ -72,11 +65,8 @@ class DescribeResultAccess(OseoOperation):
                                    'The client is not authorized to '
                                    'call the operation',
                                    locator='orderId')
-        if order.order_type.name == models.Order.PRODUCT_ORDER:
-            completed_files = self.get_product_order_completed_files(
-                order, request.subFunction)
-        else:
-            raise NotImplementedError
+        completed_files = self.get_order_completed_files(order,
+                                                         request.subFunction)
         logger.info('completed_files: {}'.format(completed_files))
         order.last_describe_result_access_request = dt.datetime.utcnow()
         order.save()
@@ -100,7 +90,7 @@ class DescribeResultAccess(OseoOperation):
             response.URLs.append(iut)
         return response, status_code, None
 
-    def get_product_order_completed_files(self, order, behaviour):
+    def get_order_completed_files(self, order, behaviour):
         """
         Get the completed files for product orders.
 
@@ -113,41 +103,53 @@ class DescribeResultAccess(OseoOperation):
         :rtype: [(models.OseoFile, models.DeliveryOption)]
         """
 
+        batches = []
+        if order.order_type.name == models.Order.PRODUCT_ORDER:
+            batches = order.batches.all()
+        elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
+            batches = order.batches.all()[1:]
+        all_complete = []
+        for b in batches:
+            #batch_complete = self.get_batch_completed_files(b, behaviour)
+            batch_complete = b.get_completed_files(behaviour)
+            all_complete.extend(batch_complete)
+        return all_complete
 
-        last_time = order.last_describe_result_access_request
-        order_delivery = order.selected_delivery_option.option
-        batch = order.batches.get()  # ProductOrder has a single batch
-        batch_status = batch.status()
-        completed = []
-        if batch_status != models.CustomizableItem.COMPLETED:
-            # batch is either still being processed,
-            # failed or already downloaded, so we don't care for it
-            pass
-        else:
-            batch_complete_items = []
-            order_items = batch.order_items.all()
-            for oi in order_items:
-                try:
-                    delivery = oi.selected_delivery_option.option
-                except models.SelectedDeliveryOption.DoesNotExist:
-                    delivery = order_delivery
-                if not hasattr(delivery, "onlinedataaccess"):
-                    # getStatus only applies to items with onlinedataaccess
-                    continue
-                if oi.status == models.CustomizableItem.COMPLETED:
-                    if (last_time is None or behaviour == self.ALL_READY) or \
-                            (behaviour == self.NEXT_READY and
-                                     oi.completed_on >= last_time):
-                        for f in oi.files.filter(available=True):
-                            batch_complete_items.append((f, delivery))
-            if order.packaging == models.Order.ZIP:
-                if len(batch_complete_items) == len(order_items):
-                    # the zip is ready, lets get only a single file
-                    # because they all point to the same URL
-                    completed.append(batch_complete_items[0])
-                else:  # the zip is not ready yet
-                    pass
-            else:  # lets get each file that is complete
-                completed = batch_complete_items
-        return completed
+    #def get_batch_completed_files(self, batch, behaviour):
+    #    order = batch.order
+    #    last_time = order.last_describe_result_access_request
+    #    order_delivery = order.selected_delivery_option.option
+    #    batch_status = batch.status()
+    #    completed = []
+    #    if batch_status != models.CustomizableItem.COMPLETED:
+    #        # batch is either still being processed,
+    #        # failed or already downloaded, so we don't care for it
+    #        pass
+    #    else:
+    #        batch_complete_items = []
+    #        order_items = batch.order_items.all()
+    #        for oi in order_items:
+    #            try:
+    #                delivery = oi.selected_delivery_option.option
+    #            except models.SelectedDeliveryOption.DoesNotExist:
+    #                delivery = order_delivery
+    #            if not hasattr(delivery, "onlinedataaccess"):
+    #                # getStatus only applies to items with onlinedataaccess
+    #                continue
+    #            if oi.status == models.CustomizableItem.COMPLETED:
+    #                if (last_time is None or behaviour == self.ALL_READY) or \
+    #                        (behaviour == self.NEXT_READY and
+    #                                 oi.completed_on >= last_time):
+    #                    for f in oi.files.filter(available=True):
+    #                        batch_complete_items.append((f, delivery))
+    #        if order.packaging == models.Order.ZIP:
+    #            if len(batch_complete_items) == len(order_items):
+    #                # the zip is ready, lets get only a single file
+    #                # because they all point to the same URL
+    #                completed.append(batch_complete_items[0])
+    #            else:  # the zip is not ready yet
+    #                pass
+    #        else:  # lets get each file that is complete
+    #            completed = batch_complete_items
+    #    return completed
 
