@@ -1,4 +1,4 @@
-# Copyright 2014 Ricardo Garcia Silva
+# Copyright 2015 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -17,97 +17,29 @@ Custom exception classes for oseoserver
 """
 
 class OseoServerError(Exception):
+    """Base calss for all oseoserver errors"""
     pass
+
 
 class ServerError(OseoServerError):
     """
     Used for errors which are related to server-side operations
     """
 
-    pass
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
 
-
-class UnAuthorizedOrder(OseoServerError):
-    pass
+    def __str__(self):
+        return "ServerError: {} {}".format(self.args, self.kwargs)
 
 
 class NonSoapRequestError(OseoServerError):
     pass
 
 
-class InvalidPackagingError(OseoServerError):
-
-    def __init__(self, packaging):
-        self.packaging = packaging
-
-    def __str__(self):
-        return "Packaging format {} is not supported".format(self.packaging)
-
-
-class InvalidOptionError(OseoServerError):
-
-    def __init__(self, option, order_config):
-        self.option = option
-        self.order_config = order_config
-
-    def __str__(self):
-        order_type = self.order_config.__class__.__name__.lower()
-        collection = self.order_config.collection.name
-        return "{} of collection {} does not support option {}".format(
-            order_type, collection, self.option)
-
-
-class InvalidGlobalOptionError(InvalidOptionError):
-
-    pass
-
-
-class InvalidOptionValueError(OseoServerError):
-
-    def __init__(self, option, value, order_config):
-        self.option = option
-        self.value = value
-        self.order_config = order_config
-
-    def __str__(self):
-        return "Value {} is not supported for option {}".format(self.value,
-                                                                self.option)
-
-class InvalidGlobalOptionValueError(InvalidOptionValueError):
-
-    pass
-
-
-class CustomOptionParsingError(OseoServerError):
-    def __init__(self, *args, **kwargs):
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return "CustomOptionParsingError: {} {}".format(self.args, self.kwargs)
-
-
-class InvalidOrderDeliveryMethodError(OseoServerError):
-    pass
-
-
-class OnlineDataAccessInvalidProtocol(OseoServerError):
-    pass
-
-
-class OnlineDataDeliveryInvalidProtocol(OseoServerError):
-    pass
-
-
-class OperationNotImplementedError(OseoServerError):
-    pass
-
-
-class SubmitWithQuotationError(OseoServerError):
-    pass
-
-
 class OseoError(OseoServerError):
+    """Base class for errors that are described in the OSEO standard."""
 
     def __init__(self, code, text, locator=None):
         self.code = code
@@ -115,43 +47,93 @@ class OseoError(OseoServerError):
         self.locator = locator
 
 
-class InvalidOrderTypeError(OseoError):
+class NoApplicableCodeError(OseoError):
 
-    def __init__(self, order_type):
+    def __init__(self):
+        code = "NoApplicableCode"
+        text = "Code not applicable"
+        super(NoApplicableCodeError, self).__init__(code, text)
+
+
+class InvalidParameterValueError(OseoError):
+
+    def __init__(self, locator):
+        code = "InvalidParameterValue"
+        text = "Invalid value for Parameter"
+        super(InvalidParameterValueError, self).__init__(code, text, locator)
+
+
+class AuthenticationFailedError(OseoError):
+
+    def __init__(self):
+        code = "AuthenticationFailed"
+        text = "Invalid or missing identity information"
+        locator = "identity_token"
+        super(AuthenticationFailedError, self).__init__(code, text, locator)
+
+
+class AuthorizationFailedError(OseoError):
+
+    def __init__(self, locator=None):
+        code = "AuthorizationFailed"
+        text = "The client is not authorized to call the operation."
+        locator = locator or "orderId"
+        super(AuthorizationFailedError, self).__init__(code, text, locator)
+
+
+class ProductOrderingNotSupportedError(OseoError):
+
+    def __init__(self):
+        code = "ProductOrderingNotSupported"
+        text = "Ordering not supported"
         locator = "orderType"
-        if order_type in ("PRODUCT_ORDER", "MASSIVE_ORDER"):
-            code = "ProductOrderingNotSupported"
-            text = "Ordering not supported"
-        elif order_type == "SUBSCRIPTION_ORDER":
-            code = "SubscriptionNotSupported"
-            text = "Subscription not supported"
-        elif order_type == "TASKING_ORDER":
-            code = "FutureProductNotSupported"
-            text = "Programming not supported"
-        else:
-            code = "InvalidParameterValue"
-            text = "Invalid value for Parameter"
-        super(InvalidOrderTypeError, self).__init__(code, text, locator)
+        super(ProductOrderingNotSupportedError, self).__init__(code, text,
+                                                               locator)
 
 
-class InvalidCollectionError(OseoError):
+class SubscriptionNotSupportedError(OseoError):
 
     def __init__(self):
+        code = "SubscriptionNotSupported"
+        text = "Subscription not supported"
+        locator = "orderType"
+        super(SubscriptionNotSupportedError, self).__init__(code, text,
+                                                            locator)
+
+
+class FutureProductNotSupportedError(OseoError):
+
+    def __init__(self):
+        code = "FutureProductNotSupported"
+        text = "Programming not supported"
+        locator = "orderType"
+        super(FutureProductNotSupportedError, self).__init__(code, text,
+                                                             locator)
+
+
+class InvalidOrderIdentifierError(OseoError):
+
+    def __init__(self):
+        code = "InvalidOrderIdentifier"
+        text = "Invalid value for order"
+        locator = "orderId"
+        super(InvalidOrderIdentifierError, self).__init__(code, text, locator)
+
+
+class UnsupportedCollectionError(OseoError):
+
+    def __init__(self):
+        code = "UnsupportedCollection"
+        text = "Subscription not supported"
         locator = "collectionId"
-        code = "InvalidParameterValue"
-        text = "Invalid value for Parameter"
-        super(InvalidCollectionError, self).__init__(code, text, locator)
+        super(UnsupportedCollectionError, self).__init__(code, text, locator)
 
 
-class InvalidDeliveryOptionError(OseoError):
+class InvalidNotificationValueError(OseoError):
 
     def __init__(self):
-        locator = "deliveryOptions"
-        code = "InvalidParameterValue"
-        text = "Invalid value for Parameter"
-        super(InvalidDeliveryOptionError, self).__init__(code, text, locator)
-
-
-class InvalidSettingsError(OseoServerError):
-    pass
-
+        code = "InvalidNotificationValue"
+        text = "Invalid value for notification"
+        locator = "ws-address"
+        super(InvalidNotificationValueError, self).__init__(code, text,
+                                                            locator)

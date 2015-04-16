@@ -62,8 +62,8 @@ class Submit(OseoOperation):
             order_spec = self.process_order_specification(
                 request.orderSpecification, user)
         else:
-            raise errors.SubmitWithQuotationError('Submit with quotationId is '
-                                                  'not implemented.')
+            raise errors.ServerError("Submit with quotationId is not "
+                                     "implemented")
         # TODO - raise an error if there are no delivery options on the
         # order_specification either at the order or order item levels
         default_status = models.Order.SUBMITTED
@@ -117,19 +117,13 @@ class Submit(OseoOperation):
             order_specification.deliveryInformation)
         spec["invoice_address"] = self.get_invoice_address(
             order_specification.invoiceAddress)
-        try:
-            spec["option"] = self._validate_global_options(
-                order_specification,
-                spec["order_type"],
-                spec["requested_order_configurations"]
-            )
-            spec["delivery_options"] = self._validate_global_delivery_options(
-                order_specification, spec["requested_order_configurations"])
-        except errors.InvalidOptionError as e:
-            raise errors.InvalidGlobalOptionError(e.option, e.order_config)
-        except errors.InvalidOptionValueError as e:
-            raise errors.InvalidGlobalOptionValueError(e.option, e.value,
-                                                       e.order_config)
+        spec["option"] = self._validate_global_options(
+            order_specification,
+            spec["order_type"],
+            spec["requested_order_configurations"]
+        )
+        spec["delivery_options"] = self._validate_global_delivery_options(
+            order_specification, spec["requested_order_configurations"])
         return spec
 
     def create_order(self, order_spec, user, status_notification, status,
@@ -381,7 +375,15 @@ class Submit(OseoOperation):
         else:  # tasking order
             config = collection.taskingorderconfiguration
         if not config.enabled:
-            raise errors.InvalidOrderTypeError(order_type.name)
+            if order_type.name in (models.Order.PRODUCT_ORDER,
+                                   models.Order.MASSIVE_ORDER):
+                raise errors.ProductOrderingNotSupportedError()
+            elif order_type.name == models.Order.SUBSCRIPTION_ORDER:
+                raise errors.SubscriptionNotSupportedError()
+            elif order_type.name == models.Order.TASKING_ORDER:
+                raise errors.FutureProductNotSupportedError()
+            else:
+                raise errors.InvalidParameterValueError("orderType")
         return config
 
     def _validate_requested_collection(self, collection_id, group):
@@ -389,12 +391,9 @@ class Submit(OseoOperation):
             collection = models.Collection.objects.get(
                 collection_id=collection_id)
             if not collection.allows_group(group):
-                raise errors.UnAuthorizedOrder(
-                    "user's group is not authorized to order {} "
-                    "products".format(collection.name)
-                )
+                raise errors.AuthorizationFailedError(locator="collectionId")
         except models.Collection.DoesNotExist:
-            raise errors.InvalidCollectionError()
+            raise errors.InvalidParameterValueError("collectionId")
         return collection
 
     def _validate_requested_options(self, requested_item, order_type,
@@ -475,9 +474,7 @@ class Submit(OseoOperation):
                     if parsed_value in choices:
                         result = parsed_value
                     else:
-                        raise errors.InvalidOptionValueError(name,
-                                                             parsed_value,
-                                                             order_config)
+                        raise errors.InvalidParameterValueError("option")
             else:
                 processing_class, params = utilities.get_custom_code(
                     order_type,
@@ -487,11 +484,9 @@ class Submit(OseoOperation):
                                                  logger_type=logger_type)
                 result = handler.parse_option(name, value, **params)
         except models.Option.DoesNotExist:
-            raise errors.InvalidOptionError(name, order_config)
-        except errors.InvalidOptionValueError:
-            raise
+            raise errors.InvalidParameterValueError("option")
         except Exception as e:
-            raise errors.CustomOptionParsingError(*e.args)
+            raise errors.ServerError(*e.args)
         return result
 
     def _validate_delivery_options(self, requested_item, order_config):
@@ -526,7 +521,7 @@ class Submit(OseoOperation):
                         mediadelivery__package_medium=p,
                         mediadelivery__shipping_instructions=s)
             except models.DeliveryOption.DoesNotExist:
-                raise errors.InvalidDeliveryOptionError()
+                raise errors.InvalidParameterValueError("deliveryOptions")
             copies = dop.numberOfCopies
             delivery["copies"] = int(copies) if copies is not None else copies
             delivery["annotation"] = _c(dop.productAnnotation)
@@ -581,22 +576,9 @@ class Submit(OseoOperation):
             raise errors.InvalidOrderTypeError(order_type.name)
         return order_type
 
-    def validate_status_notification(self, request):
-        """
-        Check that the requested status notification is supported.
-
-        :param request:
-        :return:
-        """
-
-        if request.statusNotification != models.Order.NONE:
-            raise NotImplementedError('Status notifications are '
-                                      'not supported')
-        return request.statusNotification
-
     def _validate_packaging(self, requested_packaging):
         packaging = _c(requested_packaging)
         choices = [c[0] for c in models.Order.PACKAGING_CHOICES]
         if packaging != "" and packaging not in choices:
-            raise errors.InvalidPackagingError(packaging)
+            raise errors.InvalidParameterValueError("packaging")
         return packaging

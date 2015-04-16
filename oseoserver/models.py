@@ -791,7 +791,8 @@ class SubscriptionOrder(DerivedOrder):
                 batch.create_order_item(item_status, additional_status_info,
                                         oi)
             else:
-                raise errors.InvalidCollectionError
+                raise errors.ServerError("Repeated collection: "
+                                         "{}".format(collection))
         self.batches.add(batch)
         return batch
 

@@ -1,4 +1,4 @@
-# Copyright 2014 Ricardo Garcia Silva
+# Copyright 2015 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -27,13 +27,12 @@ from oseoserver import models
 from oseoserver import errors
 from oseoserver.operations.base import OseoOperation
 
-logger = logging.getLogger('.'.join(('pyoseo', __name__)))
+logger = logging.getLogger(__name__)
 
 class DescribeResultAccess(OseoOperation):
 
     def __call__(self, request, user, **kwargs):
-        """
-        Implements the OSEO DescribeResultAccess operation.
+        """Implements the OSEO DescribeResultAccess operation.
 
         This operation returns the location of the order items that are 
         ready to be downloaded by the user.
@@ -57,14 +56,9 @@ class DescribeResultAccess(OseoOperation):
         try:
             order = models.Order.objects.get(id=request.orderId)
         except ObjectDoesNotExist:
-            raise errors.OseoError('InvalidOrderIdentifier',
-                                   'Invalid value for order',
-                                   locator=request.orderId)
+            raise errors.InvalidOrderIdentifierError()
         if not self._user_is_authorized(user, order):
-            raise errors.OseoError('AuthorizationFailed',
-                                   'The client is not authorized to '
-                                   'call the operation',
-                                   locator='orderId')
+            raise errors.AuthorizationFailedError()
         completed_files = self.get_order_completed_files(order,
                                                          request.subFunction)
         logger.info('completed_files: {}'.format(completed_files))
@@ -114,42 +108,4 @@ class DescribeResultAccess(OseoOperation):
             batch_complete = b.get_completed_files(behaviour)
             all_complete.extend(batch_complete)
         return all_complete
-
-    #def get_batch_completed_files(self, batch, behaviour):
-    #    order = batch.order
-    #    last_time = order.last_describe_result_access_request
-    #    order_delivery = order.selected_delivery_option.option
-    #    batch_status = batch.status()
-    #    completed = []
-    #    if batch_status != models.CustomizableItem.COMPLETED:
-    #        # batch is either still being processed,
-    #        # failed or already downloaded, so we don't care for it
-    #        pass
-    #    else:
-    #        batch_complete_items = []
-    #        order_items = batch.order_items.all()
-    #        for oi in order_items:
-    #            try:
-    #                delivery = oi.selected_delivery_option.option
-    #            except models.SelectedDeliveryOption.DoesNotExist:
-    #                delivery = order_delivery
-    #            if not hasattr(delivery, "onlinedataaccess"):
-    #                # getStatus only applies to items with onlinedataaccess
-    #                continue
-    #            if oi.status == models.CustomizableItem.COMPLETED:
-    #                if (last_time is None or behaviour == self.ALL_READY) or \
-    #                        (behaviour == self.NEXT_READY and
-    #                                 oi.completed_on >= last_time):
-    #                    for f in oi.files.filter(available=True):
-    #                        batch_complete_items.append((f, delivery))
-    #        if order.packaging == models.Order.ZIP:
-    #            if len(batch_complete_items) == len(order_items):
-    #                # the zip is ready, lets get only a single file
-    #                # because they all point to the same URL
-    #                completed.append(batch_complete_items[0])
-    #            else:  # the zip is not ready yet
-    #                pass
-    #        else:  # lets get each file that is complete
-    #            completed = batch_complete_items
-    #    return completed
 

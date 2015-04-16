@@ -13,8 +13,10 @@
 #   limitations under the License.
 
 """
-WSSE UsernameToken profile v1.0 authentication class for PyOSEO
+WSSE UsernameToken profile v1.0 authentication class for oseoserver
 """
+
+from oseoserver import errors
 
 
 class UsernameTokenAuthentication(object):
@@ -46,13 +48,16 @@ class UsernameTokenAuthentication(object):
         token_path = ('/{0}:Envelope/{0}:Header/wsse:Security/'
                       'wsse:UsernameToken'.format(soap_ns_key))
         user_name_path = '/'.join((token_path, 'wsse:Username/text()'))
-        user = request_element.xpath(user_name_path,
-                                     namespaces=self.SOAP_NAMESPACES)[0]
-        password_path = '/'.join((token_path, 'wsse:Password'))
-        password_element = request_element.xpath(
-            password_path,
-            namespaces=self.SOAP_NAMESPACES
-        )[0]
+        try:
+            user = request_element.xpath(user_name_path,
+                                         namespaces=self.SOAP_NAMESPACES)[0]
+            password_path = '/'.join((token_path, 'wsse:Password'))
+            password_element = request_element.xpath(
+                password_path,
+                namespaces=self.SOAP_NAMESPACES
+            )[0]
+        except IndexError:
+            raise errors.AuthenticationFailedError()
         password = password_element.text
         password_attributes = password_element.attrib
         return user, password, password_attributes

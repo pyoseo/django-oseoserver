@@ -15,6 +15,8 @@
 from datetime import datetime
 
 from tastypie.resources import ModelResource
+from tastypie.authentication import ApiKeyAuthentication
+from tastypie.authorization import DjangoAuthorization
 from tastypie import fields
 
 from oseoserver import models
@@ -26,6 +28,8 @@ class SubscriptionOrderResource(ModelResource):
     class Meta:
         queryset = models.SubscriptionOrder.objects.all()
         allowed_methods = ["get"]
+        authentication = ApiKeyAuthentication()
+        authorization = DjangoAuthorization()
 
 
 class CollectionResource(ModelResource):
@@ -33,11 +37,11 @@ class CollectionResource(ModelResource):
     class Meta:
         queryset = models.Collection.objects.all()
         allowed_methods = ["get"]
+        authentication = ApiKeyAuthentication()
+        authorization = DjangoAuthorization()
 
 
 # TODO - Add a field that shows a batch's status
-# TODO - Add a suitable authentication
-# TODO - Add a suitable authorization
 # TODO - Decide on how to handle HTTP PUT and PATCH (if at all)
 class SubscriptionBatchResource(ModelResource):
     order = fields.ForeignKey(SubscriptionOrderResource, "order")
@@ -69,3 +73,5 @@ class SubscriptionBatchResource(ModelResource):
     class Meta:
         queryset = models.SubscriptionBatch.objects.all()
         allowed_methods = ["get", "post"]
+        authentication = ApiKeyAuthentication()
+        authorization = DjangoAuthorization()

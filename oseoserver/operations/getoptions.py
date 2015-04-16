@@ -66,7 +66,7 @@ class GetOptions(OseoOperation):
                     if order_option is not None:
                         response.orderOptions.append(order_option)
             except models.Collection.DoesNotExist():
-                raise errors.InvalidCollectionError
+                raise errors.UnsupportedCollectionError()
         elif request.taskingRequestId is not None:
             raise NotImplementedError
         return response, status_code, None
