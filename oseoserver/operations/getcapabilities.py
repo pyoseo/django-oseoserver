@@ -1,4 +1,4 @@
-# Copyright 2014 Ricardo Garcia Silva
+# Copyright 2015 Ricardo Garcia Silva
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ Implements the OSEO GetCapabilities operation
 import logging
 
 from django.core.urlresolvers import reverse
+from django.contrib.sites.models import Site
 from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows_2_0 as ows
@@ -26,8 +27,9 @@ import pyxb.bundles.opengis.swes_2_0 as swes
 
 from oseoserver.operations.base import OseoOperation
 import oseoserver.server as server
+from oseoserver.models import OrderType, Order
 
-logger = logging.getLogger('.'.join(('pyoseo', __name__)))
+logger = logging.getLogger(__name__)
 
 
 class GetCapabilities(OseoOperation):
@@ -50,9 +52,9 @@ class GetCapabilities(OseoOperation):
         caps.ServiceIdentification = self._build_service_identification()
         caps.ServiceProvider = self._build_service_provider()
         caps.OperationsMetadata = self._build_operations_metadata()
-        caps.Contents = self._build_contents()
-        # caps.Notifications = swes.NotificationProducerMetadataPropertyType()
-        return caps, status_code
+        caps.Contents = self._build_contents(user)
+        caps.Notifications = self._build_notifications()
+        return caps, status_code, None
 
     def _build_service_identification(self):
         return None  # not implemented yet
@@ -62,23 +64,27 @@ class GetCapabilities(OseoOperation):
 
     def _build_operations_metadata(self):
         op_meta = ows.OperationsMetadata()
+        domain = Site.objects.get_current().domain
         for op_name in server.OseoServer.OPERATION_CLASSES.keys():
             op = ows.Operation(name=op_name)
             op.DCP.append(BIND())
             op.DCP[0].HTTP = BIND()
             op.DCP[0].HTTP.Post.append(BIND())
             op.DCP[0].HTTP.Post[0].href = "http://{}{}".format(
-                "localhost:8000",  # change this
-                reverse("oseo_endpoint")
-            )
+                domain, reverse("oseo_endpoint"))
             op_meta.Operation.append(op)
         return op_meta
 
     def _build_contents(self, user):
+        product_order_type = OrderType.objects.get(name=Order.PRODUCT_ORDER)
+        subscription_order_type = OrderType.objects.get(
+            name=Order.SUBSCRIPTION_ORDER)
+        tasking_order_type = OrderType.objects.get(name=Order.TASKING_ORDER)
+        logger.debug("before creating OrderingServiceContentsType...")
         contents = oseo.OrderingServiceContentsType(
-            ProductOrders=BIND(supported=True),
-            SubscriptionOrders=BIND(supported=True),
-            ProgrammingOrders=BIND(supported=False),
+            ProductOrders=BIND(supported=product_order_type.enabled),
+            SubscriptionOrders=BIND(supported=subscription_order_type.enabled),
+            ProgrammingOrders=BIND(supported=tasking_order_type.enabled),
             GetQuotationCapabilities=BIND(supported=False,
                                           synchronous=False,
                                           asynchronous=False,
@@ -92,18 +98,33 @@ class GetCapabilities(OseoOperation):
                 globalOrderOptions=True,
                 localOrderOptions=True
             ),
-            GetStatusCapabilities=BIND(supported=True,
-                                       orderSearch=True,
+            GetStatusCapabilities=BIND(orderSearch=True,
                                        orderRetrieve=True,
                                        full=True),
             DescribeResultAccessCapabilities=BIND(supported=True),
-            CancelCapabilities=BIND(supported=False,
+            CancelCapabilities=BIND(supported=True,
                                     asynchronous=False),
         )
+        logger.debug("before adding CollectionCapability...")
         for collection in user.oseo_group.collection_set.all():
-            cc = oseo.CollectionCapability(
-                collectionId=collection.collection_id
+            c = oseo.CollectionCapability(
+            collectionId=collection.collection_id,
+            ProductOrders=BIND(
+                supported=collection.productorderconfiguration.enabled),
+            SubscriptionOrders=BIND(
+                supported=collection.subscriptionorderconfiguration.enabled),
+            DescribeResultAccessCapabilities=BIND(supported=True),
+            CancelCapabilities=BIND(supported=True, asynchronous=False),
             )
-            contents.SupportedCollection.append(cc)
+            contents.SupportedCollection.append(c)
+        contents.ContentsType.append(
+            oseo.EncodingType(
+                supportedEncoding=["XMLEncoding", "TextEncoding"]
+            )
+        )
         return contents
+
+    def _build_notifications(self):
+        # caps.Notifications = swes.NotificationProducerMetadataPropertyType()
+        return None
 
