@@ -753,10 +753,9 @@ class ProductOrder(Order):
         return "{}({})".format(self.__class__.__name__, self.id)
 
 
+# TODO - Remove this model
 class DerivedOrder(Order):
-    collections = models.ManyToManyField("Collection",
-                                         related_name="derived_orders")
-
+    pass
 
 class MassiveOrder(DerivedOrder):
 

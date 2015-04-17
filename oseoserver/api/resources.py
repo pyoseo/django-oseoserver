@@ -18,6 +18,7 @@ from tastypie.resources import ModelResource
 from tastypie.authentication import ApiKeyAuthentication
 from tastypie.authorization import DjangoAuthorization
 from tastypie import fields
+from tastypie.constants import ALL, ALL_WITH_RELATIONS
 
 from oseoserver import models
 import oseoserver.server
@@ -30,6 +31,10 @@ class SubscriptionOrderResource(ModelResource):
         allowed_methods = ["get"]
         authentication = ApiKeyAuthentication()
         authorization = DjangoAuthorization()
+        filtering = {
+            "status": ALL,
+            "id": ALL,
+        }
 
 
 class CollectionResource(ModelResource):
@@ -39,6 +44,9 @@ class CollectionResource(ModelResource):
         allowed_methods = ["get"]
         authentication = ApiKeyAuthentication()
         authorization = DjangoAuthorization()
+        filtering = {
+            "name": ALL,
+        }
 
 
 # TODO - Add a field that shows a batch's status
@@ -75,3 +83,6 @@ class SubscriptionBatchResource(ModelResource):
         allowed_methods = ["get", "post"]
         authentication = ApiKeyAuthentication()
         authorization = DjangoAuthorization()
+        filtering = {
+            "order": ALL_WITH_RELATIONS,
+            }
