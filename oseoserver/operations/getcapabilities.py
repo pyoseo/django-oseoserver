@@ -23,7 +23,7 @@ from django.contrib.sites.models import Site
 from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows_2_0 as ows
-import pyxb.bundles.opengis.swes_2_0 as swes
+#import pyxb.bundles.opengis.swes_2_0 as swes
 
 from oseoserver.operations.base import OseoOperation
 import oseoserver.server as server
@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 class GetCapabilities(OseoOperation):
 
     def __call__(self, request, user, **kwargs):
-        """
-        Implements the OSEO GetCapabilities operation.
+        """Implements the OSEO GetCapabilities operation.
+
+        Please refer to section 8. GetCapabilities operation of the OSEO
+        standard for more details on this operation.
 
         :param request:
         :param user:
