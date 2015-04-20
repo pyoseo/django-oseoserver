@@ -28,7 +28,7 @@ class SubscriptionOrderResource(ModelResource):
 
     class Meta:
         queryset = models.SubscriptionOrder.objects.all()
-        allowed_methods = ["get"]
+        allowed_methods = ["get", "post"]
         authentication = ApiKeyAuthentication()
         authorization = DjangoAuthorization()
         filtering = {
@@ -41,11 +41,12 @@ class CollectionResource(ModelResource):
 
     class Meta:
         queryset = models.Collection.objects.all()
-        allowed_methods = ["get"]
+        allowed_methods = ["get", "post"]
         authentication = ApiKeyAuthentication()
         authorization = DjangoAuthorization()
         filtering = {
             "name": ALL,
+            "id": ALL,
         }
 
 
@@ -54,6 +55,15 @@ class CollectionResource(ModelResource):
 class SubscriptionBatchResource(ModelResource):
     order = fields.ForeignKey(SubscriptionOrderResource, "order")
     collection = fields.ForeignKey(CollectionResource, "collection")
+
+    class Meta:
+        queryset = models.SubscriptionBatch.objects.all()
+        allowed_methods = ["get", "post"]
+        authentication = ApiKeyAuthentication()
+        authorization = DjangoAuthorization()
+        filtering = {
+            "order": ALL_WITH_RELATIONS,
+            }
 
     def obj_create(self, bundle, **kwargs):
         """Create a subscription bath and place it in the processing queue
@@ -67,22 +77,16 @@ class SubscriptionBatchResource(ModelResource):
         :return:
         """
 
+        bundle = self.full_hydrate(bundle)
         collection_uri = bundle.data["collection"]
         collection_resource = CollectionResource()
-        collection = collection_resource.get_via_uri(collection_uri)
+        collection = collection_resource.get_via_uri(collection_uri,
+                                                     request=bundle.request)
         order_uri = bundle.data["order"]
         order_resource = SubscriptionOrderResource()
-        order = order_resource.get_via_uri(order_uri)
+        order = order_resource.get_via_uri(order_uri, request=bundle.request)
         timeslot = datetime.strptime(bundle.data["timeslot"],
                                      "%Y-%m-%dT%H:%M:%S")
         s = oseoserver.server.OseoServer()
         s.dispatch_subscription_order(order, timeslot, collection)
 
-    class Meta:
-        queryset = models.SubscriptionBatch.objects.all()
-        allowed_methods = ["get", "post"]
-        authentication = ApiKeyAuthentication()
-        authorization = DjangoAuthorization()
-        filtering = {
-            "order": ALL_WITH_RELATIONS,
-            }
