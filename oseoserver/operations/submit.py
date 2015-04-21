@@ -420,7 +420,14 @@ class Submit(OseoOperation):
                 option_name = etree.QName(value).localname
                 option_value = self._validate_selected_option(
                     option_name, value, order_type, order_config)
-                valid_options[option_name] = option_value
+                option_model = order_config.options.get(name=option_name)
+                if option_model.multiple_entries:
+                    if valid_options.has_key(option_name):
+                        valid_options[option_name].append(option_value)
+                    else:
+                        valid_options[option_name] = [option_value]
+                else:
+                    valid_options[option_name] = option_value
         return valid_options
 
     def _validate_global_options(self, requested_order_spec,
@@ -445,10 +452,10 @@ class Submit(OseoOperation):
 
         :param name: The name of the option
         :type name: string
-        :param value:
-        :type value:
-        :param order_type:
-        :type order_type:
+        :param value: The XML element with the custom schema
+        :type value: lxml.etree.Element
+        :param order_type: the django record with the order type
+        :type order_type: models.OrderType
         :param order_config:
         :type order_config:
         :return:
@@ -474,7 +481,8 @@ class Submit(OseoOperation):
                     if parsed_value in choices:
                         result = parsed_value
                     else:
-                        raise errors.InvalidParameterValueError("option")
+                        raise errors.InvalidParameterValueError(
+                            "option", value=parsed_value)
             else:
                 processing_class, params = utilities.get_custom_code(
                     order_type,
@@ -483,9 +491,12 @@ class Submit(OseoOperation):
                 handler = utilities.import_class(processing_class,
                                                  logger_type=logger_type)
                 result = handler.parse_option(name, value, **params)
+        except errors.InvalidParameterValueError:
+            raise
         except models.Option.DoesNotExist:
-            raise errors.InvalidParameterValueError("option")
+            raise errors.InvalidParameterValueError("option", value=name)
         except Exception as e:
+            logger.error(e)
             raise errors.ServerError(*e.args)
         return result
 

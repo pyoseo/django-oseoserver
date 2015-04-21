@@ -206,7 +206,7 @@ class OrderItemAdmin(admin.ModelAdmin):
 
 @admin.register(models.Option)
 class OptionAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'available_choices',)
+    list_display = ('id', 'name', 'available_choices', 'multiple_entries',)
     inlines = [OptionChoiceInline,]
 
 

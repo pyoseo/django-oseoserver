@@ -28,7 +28,7 @@ class ExampleOrderProcessor(object):
     def __init__(self, **kwargs):
         pass
 
-    def parse_option(name, value, **kwargs):
+    def parse_option(self, name, value, **kwargs):
         """
 
         :param name:
@@ -36,7 +36,9 @@ class ExampleOrderProcessor(object):
         :return:
         """
 
-        parsed_value = value.text
+        logger.debug("locals: {}".format(locals()))
+        #parsed_value = value.text
+        parsed_value = value
         logger.debug("name: {}".format(name))
         logger.debug("value: {}".format(value))
         logger.debug("parsed_value: {}".format(parsed_value))

@@ -68,6 +68,10 @@ class AbstractDeliveryAddress(models.Model):
 class AbstractOption(models.Model):
     name = models.CharField(max_length=100)
     description = models.CharField(max_length=255, blank=True)
+    multiple_entries = models.BooleanField(
+        default=False,
+        help_text="Can this option have multiple selections?"
+    )
 
     class Meta:
         abstract = True

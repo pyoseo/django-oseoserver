@@ -46,6 +46,9 @@ class OseoError(OseoServerError):
         self.text = text
         self.locator = locator
 
+    def __str__(self):
+        return "{0.text}: {0.locator}".format(self)
+
 
 class NoApplicableCodeError(OseoError):
 
@@ -57,11 +60,14 @@ class NoApplicableCodeError(OseoError):
 
 class InvalidParameterValueError(OseoError):
 
-    def __init__(self, locator):
+    def __init__(self, locator, value=""):
         code = "InvalidParameterValue"
         text = "Invalid value for Parameter"
+        self.value = value
         super(InvalidParameterValueError, self).__init__(code, text, locator)
 
+    def __str__(self):
+        return "{0.text}: {0.locator} {0.value}".format(self)
 
 class AuthenticationFailedError(OseoError):
 
