@@ -154,7 +154,6 @@ class PendingOrderAdmin(admin.ModelAdmin):
 @admin.register(models.ProductOrder)
 class ProductOrderAdmin(admin.ModelAdmin):
     list_display = ("id", "status", "user",)
-    list_editable = ("status",)
 
 
 @admin.register(models.SubscriptionOrder)

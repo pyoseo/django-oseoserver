@@ -29,7 +29,9 @@ class ExampleOrderProcessor(object):
         pass
 
     def parse_option(self, name, value, **kwargs):
-        """
+        """Parse an option and extract its value.
+
+        This method will be called by oseoserver for each selected...
 
         :param name:
         :param value:

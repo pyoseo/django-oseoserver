@@ -365,7 +365,6 @@ class Submit(OseoOperation):
         :return:
         """
 
-        logger.info("collection: {}".format(collection))
         if order_type.name == models.Order.PRODUCT_ORDER:
             config = collection.productorderconfiguration
         elif order_type.name == models.Order.MASSIVE_ORDER:
@@ -423,9 +422,10 @@ class Submit(OseoOperation):
                 option_model = order_config.options.get(name=option_name)
                 if option_model.multiple_entries:
                     if valid_options.has_key(option_name):
-                        valid_options[option_name].append(option_value)
+                        valid_options[option_name] = " ".join(
+                            (valid_options[option_name], option_value))
                     else:
-                        valid_options[option_name] = [option_value]
+                        valid_options[option_name] = option_value
                 else:
                     valid_options[option_name] = option_value
         return valid_options
