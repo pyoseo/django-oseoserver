@@ -103,10 +103,9 @@ def process_batch(self, batch_id, update_order_status=True,
         job = group(header)
     if notify_batch_execution:
         c = chain(
-            job.apply_async(),
-            notify_batch_execution_ended.apply_async((batch_id,),
-                                                     immutable=True)
-        )
+            job,
+            notify_batch_execution_ended.subtask((batch_id,), immutable=True)
+        ).apply_async()
     else:
         job.apply_async()
 
@@ -119,7 +118,12 @@ def notify_batch_execution_ended(self, batch_id):
     except models.SubscriptionBatch.DoesNotExist:
         b = batch
     action.send(b, verb="has finished execution")
-    subject = "{} is ready to download".format(b)
+    if b.status() == models.CustomizableItem.COMPLETED:
+        subject = "{} is ready to download".format(b)
+    elif b.status() == models.CustomizableItem.FAILED:
+        subject = "{} has failed".format(b)
+    else:
+        subject = "{} has some other status: {}".format(b, b.status())
     message = subject
     recipients = models.User.objects.filter(
         Q(is_staff=True) | Q(pk = b.order.user.user.pk)
