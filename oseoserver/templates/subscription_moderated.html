@@ -1,0 +1,27 @@
+<h3>Subscription Order {{ order.id }} has been {{ order.status|lower }}</h3>
+
+{% if approved %}
+    <p>Collections:
+        <ul>
+            {% for collection in collections %}
+            <li>{{ collection.name }}</li>
+            {% endfor %}
+        </ul>
+    </p>
+
+<p>New order batches will become available for download as soon as products
+get generated.</p>
+
+<p>This subscription begins on
+<strong>{{ order.derivedorder.subscriptionorder.begin_on }}</strong> and will
+be active until
+<strong>{{ order.derivedorder.subscriptionorder.end_on }}</strong>. It can be
+cancelled by visiting Copernicus Global Land's access page at:</p>
+
+<p><a href="http://land.copernicus.eu/global/access">http://land.copernicus.eu/global/access</a></p>
+
+{% else %}
+<p>Additional details:</p>
+<p>{{ details }}</p>
+
+{% endif %}

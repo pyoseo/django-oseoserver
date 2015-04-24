@@ -46,6 +46,8 @@ that preform each OSEO operation.
 import logging
 from datetime import datetime
 
+from django.template.loader import render_to_string
+from django.db.models import Q
 from lxml import etree
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows as ows_bindings
@@ -537,6 +539,18 @@ class OseoServer(object):
         else:
             order.status = models.CustomizableItem.CANCELLED
             order.additional_status_info = rejection_details
+
+        mail_recipients = models.OseoUser.objects.filter(
+            Q(orders__id=order.id) | Q(user__is_staff=True)
+        ).exclude(user__email="")
+
+        if order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
+            utilities.send_subscription_moderated_email(
+                order, approved, mail_recipients,
+                acceptance_details, rejection_details
+            )
+        else:
+            pass
         order.save()
 
     def _wrap_soap(self, response, soap_version):
