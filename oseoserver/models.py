@@ -768,6 +768,11 @@ class MassiveOrder(DerivedOrder):
 
 
 class SubscriptionOrder(DerivedOrder):
+    begin_on = models.DateTimeField(help_text="Date and time for when the "
+                                              "subscription should become "
+                                              "active.")
+    end_on = models.DateTimeField(help_text="Date and time for when the "
+                                            "subscription should terminate.")
 
     def create_batch(self, item_status, additional_status_info,
                      *order_item_spec, **kwargs):
