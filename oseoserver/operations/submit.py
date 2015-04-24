@@ -17,6 +17,7 @@ Implements the OSEO Submit operation
 """
 
 import logging
+from datetime import datetime
 
 from django.db import transaction
 from pyxb import BIND
@@ -154,7 +155,11 @@ class Submit(OseoOperation):
         elif order_spec["order_type"].name == models.Order.MASSIVE_ORDER:
             order = models.MassiveOrder(**general_params)
         elif order_spec["order_type"].name == models.Order.SUBSCRIPTION_ORDER:
-            order = models.SubscriptionOrder(**general_params)
+            #FIXME - get start and end time for subscriptions from the request
+            begin_on = datetime(2015, 1, 1)
+            end_on = datetime(2030, 12, 23)
+            order = models.SubscriptionOrder(begin_on=begin_on, end_on=end_on,
+                                             **general_params)
         else:
             order = models.TaskingOrder(**general_params)
         order.save()

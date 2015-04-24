@@ -34,6 +34,8 @@ class SubscriptionOrderResource(ModelResource):
         filtering = {
             "status": ALL,
             "id": ALL,
+            "begin_on": ALL,
+            "end_on": ALL,
         }
 
 
