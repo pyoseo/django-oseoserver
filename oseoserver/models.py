@@ -908,6 +908,7 @@ class OseoFile(models.Model):
     url = models.CharField(max_length=255, help_text="URL where this file "
                                                      "is available")
     expires_on = models.DateTimeField(null=True, blank=True)
+    last_downloaded_at = models.DateTimeField(null=True, blank=True)
     available = models.BooleanField(default=False)
     downloads = models.SmallIntegerField(default=0,
                                          help_text="Number of times this "

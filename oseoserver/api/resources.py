@@ -24,6 +24,19 @@ from oseoserver import models
 import oseoserver.server
 
 
+class OseoFileResource(ModelResource):
+
+    class Meta:
+        queryset = models.OseoFile.objects.all()
+        allowed_methods = ["get", "put"]
+        authentication = ApiKeyAuthentication()
+        authorization = DjangoAuthorization()
+        filtering = {
+            "url": ALL,
+            "last_downloaded_at": ALL,
+            }
+
+
 class SubscriptionOrderResource(ModelResource):
 
     class Meta:
