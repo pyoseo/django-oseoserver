@@ -1,0 +1,9 @@
+<h3>Order {{batch.order.id}} is available</h3>
+<p>The following files are available to download:</p>
+<p>
+    <ul>
+        {% for url in urls %}
+        <li><a href="{{ url }}">{{ url }}</a></li>
+        {% endfor %}
+    </ul>
+</p>

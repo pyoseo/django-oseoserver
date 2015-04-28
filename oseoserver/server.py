@@ -361,10 +361,7 @@ class OseoServer(object):
                 order_item.files.all().delete()
             batch.updated_on = datetime.utcnow()
             batch.save()
-        tasks.process_batch.apply_async(
-            (batch.id,),
-            {"update_order_status": False, "notify_batch_execution": True}
-        )
+        tasks.process_subscription_order_batch.apply_async((batch.id,))
 
     def process_subscription_orders(self, timeslot, collections=None,
                                     order_id=None):

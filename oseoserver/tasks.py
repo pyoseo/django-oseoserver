@@ -60,81 +60,62 @@ def process_product_order(self, order_id):
         order.additional_status_info = "Order is being processed"
         order.save()
     except models.ProductOrder.DoesNotExist:
-        logger.error('could not find order {}'.format(order_id))
+        logger.error('Could not find order {}'.format(order_id))
         raise
-    g = []
-    for batch in order.batches.all():
-        sig = process_batch.subtask((batch.id,),
-                                    {"notify_batch_execution": False})
-        g.append(sig)
-    job = group(g)
-    job.apply_async()
+    batch = order.batches.get() # normal product orders have only one batch
+    process_product_order_batch.apply_async((batch.id,))
 
 
 @shared_task(bind=True)
-def process_batch(self, batch_id, update_order_status=True,
-                  notify_batch_execution=True):
-    try:
-        batch = models.Batch.objects.get(pk=batch_id)
-    except models.Batch.DoesNotExist:
-        logger.error('Could not find batch {}'.format(batch_id))
-        raise
-    header = []
-    order = batch.order
-    for order_item in batch.order_items.all():
-        try:
-            selected = order_item.selected_delivery_option
-        except models.SelectedDeliveryOption.DoesNotExist:
-            selected = order.selected_delivery_option
-        if hasattr(selected.option, 'onlinedataaccess'):
-            sig = process_online_data_access_item.subtask((order_item.id,))
-        elif hasattr(selected.option, 'onlinedatadelivery'):
-            sig = process_online_data_delivery_item.subtask((order_item.id,))
-        elif hasattr(selected.option, 'mediadelivery'):
-            sig = process_media_delivery_item.subtask((order_item.id,))
-        else:
-            raise
-        header.append(sig)
-    if update_order_status:
-        body = update_product_order_status.subtask((order.id,),
-                                                   immutable=True)
-        job = chord(header, body)
-    else:
-        job = group(header)
-    if notify_batch_execution:
+def process_subscription_order_batch(self, batch_id, notify_user=True):
+    """Process a subscription order batch."""
+
+    celery_group = _process_batch(batch_id)
+    if notify_user:
         c = chain(
-            job,
-            notify_batch_execution_ended.subtask((batch_id,), immutable=True)
-        ).apply_async()
+            celery_group,
+            notify_user_subscription_batch_available.subtask((batch_id,),
+                                                             immutable=True)
+        )
+        c.apply_async()
     else:
-        job.apply_async()
+        celery_group.apply_async()
 
 
 @shared_task(bind=True)
-def notify_batch_execution_ended(self, batch_id):
+def process_product_order_batch(self, batch_id, notify_user=False):
+    """Process a normal product order batch."""
+
+    celery_group = _process_batch(batch_id)
     batch = models.Batch.objects.get(pk=batch_id)
-    try:
-        b = batch.subscriptionbatch
-    except models.SubscriptionBatch.DoesNotExist:
-        b = batch
-    action.send(b, verb="has finished execution")
-    if b.status() == models.CustomizableItem.COMPLETED:
-        subject = "{} is ready to download".format(b)
-    elif b.status() == models.CustomizableItem.FAILED:
-        subject = "{} has failed".format(b)
+    c = chain(
+        celery_group,
+        update_product_order_status.subtask((batch.order.id,), immutable=True)
+    )
+    if notify_user:
+        job = chain(c,
+                    notify_user_product_batch_available.subtask((batch_id,)))
+        job.apply_async()
     else:
-        subject = "{} has some other status: {}".format(b, b.status())
-    message = subject
-    recipients = models.User.objects.filter(
-        Q(is_staff=True) | Q(pk = b.order.user.user.pk)
-    ).exclude(email="")
-    utilities.send_email(subject, message, recipients)
+        c.apply_async()
+
+
+@shared_task(bind=True)
+def notify_user_subscription_batch_available(self, batch_id):
+    batch = models.Batch.objects.get(pk=batch_id)
+    utilities.send_subscription_batch_available_email(batch)
+
+
+@shared_task(bind=True)
+def notify_user_product_batch_available(self, batch_id):
+    batch = models.Batch.objects.get(pk=batch_id)
+    utilities.send_product_batch_available_email(batch)
 
 
 @shared_task(bind=True)
 def process_online_data_access_item(self, order_item_id):
     """
-    Process an order item that specifies online data access as delivery
+    Process an order item that specifies online data access as delivery.
     """
 
     order_item = models.OrderItem.objects.get(pk=order_item_id)
@@ -142,9 +123,6 @@ def process_online_data_access_item(self, order_item_id):
     order_item.additional_status_info = "Item is being processed"
     order_item.save()
     try:
-        # for testing purposes only
-        #if order_item.item_id == "item_01":
-        #    raise IOError("Some fake error")
         order = order_item.batch.order
         processor, params = utilities.get_processor(
             order.order_type,
@@ -305,6 +283,38 @@ def delete_batch(self, batch_id, expired_files_only=True):
         oseo_file.save()
 
 
+# TODO - Activate this task
+# This is conditional on the existance of a new field in Batches that
+# specifies how many times should a failed batch be retried. There must
+# be a new celery-beat process that is in charge of running this task
+# periodically
+#@shared_task(bind=True)
+#def retry_failed_batches(self):
+#    """Try to process a failed batch again"""
+#
+#    g = []
+#    for failed_batch in models.Batch.objects.filter(
+#            status=models.CustomizableItem.FAILED):
+#        if failed_batch.processing_attempts < models.Batch.MAX_ATTEMPTS:
+#            if hasattr(failed_batch, "subscriptionbatch"):
+#                update_order_status = False
+#                notify_batch_execution = True
+#            else:
+#                update_order_status = True
+#                notify_batch_execution = False
+#            g.append(
+#                old_process_batch.subtask(
+#                    (failed_batch.id,),
+#                    {
+#                        "update_order_status": update_order_status,
+#                        "notify_batch_execution": notify_batch_execution
+#                    }
+#                )
+#            )
+#    job = group(g)
+#    job.apply_async()
+
+
 @shared_task(bind=True)
 def delete_failed_orders(self):
     g = []
@@ -319,6 +329,36 @@ def delete_failed_orders(self):
                         "yet".format(order.order_type.name))
     job = group(g)
     job.apply_async()
+
+
+def _process_batch(batch_id):
+    """
+    Generate a celery group with subtasks for every order item in the batch.
+    """
+
+    print("batch_id: {}".format(batch_id))
+    try:
+        batch = models.Batch.objects.get(pk=batch_id)
+    except models.Batch.DoesNotExist:
+        logger.error('Could not find batch {}'.format(batch_id))
+        raise
+    g = []
+    order = batch.order
+    for order_item in batch.order_items.all():
+        try:
+            selected = order_item.selected_delivery_option
+        except models.SelectedDeliveryOption.DoesNotExist:
+            selected = order.selected_delivery_option
+        if hasattr(selected.option, 'onlinedataaccess'):
+            sig = process_online_data_access_item.subtask((order_item.id,))
+        elif hasattr(selected.option, 'onlinedatadelivery'):
+            sig = process_online_data_delivery_item.subtask((order_item.id,))
+        elif hasattr(selected.option, 'mediadelivery'):
+            sig = process_media_delivery_item.subtask((order_item.id,))
+        else:
+            raise
+        g.append(sig)
+    return group(g)
 
 
 def _package_batch(batch, compression):

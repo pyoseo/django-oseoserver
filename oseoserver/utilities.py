@@ -28,6 +28,7 @@ from mailqueue.models import MailerMessage
 
 logger = logging.getLogger('.'.join(('pyoseo', __name__)))
 
+
 def import_class(python_path, *instance_args, **instance_kwargs):
     """
     """
@@ -46,6 +47,7 @@ def get_custom_code(order_type, processing_step):
     logger.debug('processing_class: {}'.format(processing_class))
     logger.debug('params: {}'.format(params))
     return processing_class, params
+
 
 def get_processor(order_type, processing_step,
                   *instance_args, **instance_kwargs):
@@ -136,6 +138,42 @@ def send_subscription_moderated_email(order, approved, recipients,
     subject = "Copernicus Global Land Service - Subscription has " \
               "been {}".format("accepted" if approved else "rejected")
     msg = render_to_string(template, context)
+    send_email(subject, msg, recipients, html=True)
+
+
+def send_subscription_batch_available_email(batch):
+    urls = []
+    collections = set()
+    for oi in batch.order_items.all():
+        for oseo_file in oi.files.all():
+            urls.append(oseo_file.url)
+            collections.add(oi.collection)
+    context = {
+        "batch": batch,
+        "urls": urls,
+        "collections": collections,
+    }
+    template = "subscription_batch_available.html"
+    subject = "Copernicus Global Land Service - Subscription files available"
+    msg = render_to_string(template, context)
+    recipients = [batch.order.user]
+    send_email(subject, msg, recipients, html=True)
+
+
+def send_product_batch_available_email(batch):
+    urls = []
+    for oi in batch.order_items.all():
+        for oseo_file in oi.files.all():
+            urls.append(oseo_file.url)
+    context = {
+        "batch": batch,
+        "urls": urls,
+        }
+    template = "normal_product_batch_available.html"
+    subject = "Copernicus Global Land Service - Order {} available".format(
+        batch.order.id)
+    msg = render_to_string(template, context)
+    recipients = [batch.order.user]
     send_email(subject, msg, recipients, html=True)
 
 

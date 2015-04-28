@@ -1,0 +1,17 @@
+<h3>SubscriptionBatch {{batch.id}} is available</h3>
+<p>Subscription order: {{batch.order.id}}</p>
+<p>Ordered collections:
+    <ul>
+        {% for collection in collections %}
+        <li>{{ collection.name }}</li>
+        {% endfor %}
+    </ul>
+</p>
+<p>The following files are available to download:</p>
+<p>
+    <ul>
+        {% for url in urls %}
+            <li><a href="{{ url }}">{{ url }}</a></li>
+        {% endfor %}
+    </ul>
+</p>
