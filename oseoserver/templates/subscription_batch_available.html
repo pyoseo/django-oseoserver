@@ -1,5 +1,6 @@
 <h3>SubscriptionBatch {{batch.id}} is available</h3>
 <p>Subscription order: {{batch.order.id}}</p>
+<p>Timeslot: {{ batch.timeslot|date:"Y/m/d" }}T{{ batch.timeslot|time:"H:i:s" }}</p>
 <p>Ordered collections:
     <ul>
         {% for collection in collections %}

@@ -102,7 +102,7 @@ def process_product_order_batch(self, batch_id, notify_user=False):
 
 @shared_task(bind=True)
 def notify_user_subscription_batch_available(self, batch_id):
-    batch = models.Batch.objects.get(pk=batch_id)
+    batch = models.SubscriptionBatch.objects.get(pk=batch_id)
     utilities.send_subscription_batch_available_email(batch)
 
 
