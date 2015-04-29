@@ -339,6 +339,7 @@ class OseoServer(object):
             order=order, collection=collection, timeslot=timeslot)
         if created:
             batch.order = order
+            batch.save()
             processor, params = utilities.get_processor(
                 order.order_type,
                 models.ItemProcessor.PROCESSING_PROCESS_ITEM,
@@ -347,14 +348,8 @@ class OseoServer(object):
             identifiers = processor.get_subscription_batch_identifiers(
                 timeslot, collection, **params)
             spec = order.batches.first()
-            new_order_items = self._clone_subscription_batch(
-                identifiers, spec, timeslot, collection)
-            for item in new_order_items:
-                item.item_id = "{}_{}_{}".format(order.reference, batch.id,
-                                                 item.identifier)
-                item.batch = batch
-                item.save()
-            batch.save()
+            self._clone_subscription_batch(identifiers, spec, timeslot,
+                                           collection, batch)
             order.save()
         else:
             for order_item in batch.order_items.all():
@@ -448,7 +443,7 @@ class OseoServer(object):
 
     def _clone_subscription_batch(self, order_item_identifiers,
                                   subscription_spec_batch, timeslot,
-                                  collection):
+                                  collection, new_batch):
         try:
             col_item = subscription_spec_batch.order_items.get(
                 collection=collection)
@@ -467,13 +462,18 @@ class OseoServer(object):
             raise errors.ServerError("Invalid collection: "
                                      "{}".format(collection))
         # django way of cloning model instances is to set the pk and id to None
-        new_items = []
         for ident in order_item_identifiers:
             new_item = col_item
             new_item.pk = None
             new_item.id = None
             new_item.identifier = ident
+            new_item.batch = new_batch
             new_item.save()
+            new_item.item_id = "{}_{}_{}".format(
+                subscription_spec_batch.order.reference,
+                new_batch.id,
+                new_item.identifier
+            )
             new_item.selected_options = col_item_options
             new_item.selected_scene_selection_options = col_item_scene_options
             if col_item_payment_option is not None:
@@ -482,8 +482,10 @@ class OseoServer(object):
                 new_item.selected_delivery_option = col_item_delivery_option
             new_item.status = models.CustomizableItem.ACCEPTED
             new_item.additional_status_info = ""
-            new_items.append(new_item)
-        return new_items
+            new_item.save()
+        new_batch.save()
+
+
 
     def _get_operation(self, pyxb_request):
         oseo_op = pyxb_request.toDOM().firstChild.tagName.partition(":")[-1]

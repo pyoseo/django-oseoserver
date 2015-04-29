@@ -103,5 +103,6 @@ class SubscriptionBatchResource(ModelResource):
         timeslot = datetime.strptime(bundle.data["timeslot"],
                                      "%Y-%m-%dT%H:%M:%S")
         s = oseoserver.server.OseoServer()
-        s.dispatch_subscription_order(order, timeslot, collection)
+        s.process_subscription_orders(timeslot, collections=[collection.name],
+                                      order_id=order.id)
 
