@@ -9,6 +9,7 @@ v1_api.register(oseoserver.api.resources.SubscriptionBatchResource())
 v1_api.register(oseoserver.api.resources.SubscriptionOrderResource())
 v1_api.register(oseoserver.api.resources.CollectionResource())
 v1_api.register(oseoserver.api.resources.OseoFileResource())
+v1_api.register(oseoserver.api.resources.UserResource())
 
 urlpatterns = patterns(
     '',

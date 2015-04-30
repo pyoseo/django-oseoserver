@@ -24,6 +24,19 @@ from oseoserver import models
 import oseoserver.server
 
 
+class UserResource(ModelResource):
+
+    class Meta:
+        queryset = models.User.objects.all()
+        allowed_methods = ["get", "put", "patch"]
+        authentication = ApiKeyAuthentication()
+        authorization = DjangoAuthorization()
+        filtering = {
+            "username": ALL,
+            "email": ALL,
+        }
+
+
 class OseoFileResource(ModelResource):
 
     class Meta:
@@ -49,6 +62,7 @@ class SubscriptionOrderResource(ModelResource):
             "id": ALL,
             "begin_on": ALL,
             "end_on": ALL,
+            "reference": ALL,
         }
 
 
