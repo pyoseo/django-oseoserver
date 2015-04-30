@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" 
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:gml="http://www.opengis.net/gml"
     targetNamespace="ipma.pt.pyoseo" elementFormDefault="qualified"
     xmlns:ipma="ipma.pt.pyoseo">
     <xs:annotation>
@@ -24,10 +24,11 @@
         </xs:restriction>
     </xs:simpleType>
     <xs:element name='RegionOfInterest' type='ipma:RegionOfInterestType'></xs:element>
-    <xs:simpleType name='RegionOfInterestType'>
-        <xs:restriction base="xs:string">
-        </xs:restriction>
-    </xs:simpleType>
+    <xs:complexType name='RegionOfInterestType'>
+        <xs:sequence maxOccurs="1" minOccurs="1">
+            <xs:any/>
+        </xs:sequence>
+    </xs:complexType>
     <xs:element name='dataset' type='ipma:DatasetType'></xs:element>
     <xs:simpleType name='DatasetType'>
         <xs:restriction base="xs:string">
