@@ -108,7 +108,7 @@ class Batch(models.Model):
             CustomizableItem.FAILED: 6,
             CustomizableItem.TERMINATED: 7,
             CustomizableItem.DOWNLOADED: 8,
-            }
+        }
         item_statuses = set([oi.status for oi in self.order_items.all()])
         if CustomizableItem.FAILED in item_statuses:
             status = CustomizableItem.FAILED
