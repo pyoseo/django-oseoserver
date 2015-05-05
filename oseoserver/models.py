@@ -135,19 +135,6 @@ class Batch(models.Model):
         #total += order_fee
         return total
 
-    def expired_files(self):
-        now = datetime.now(pytz.utc)
-        expired = OseoFile.objects.filter(available=True, expires_on__lt=now,
-                                          order_item__batch=self)
-        expired = list(expired)  # forcing evaluation of the queryset
-        if self.order.user.delete_downloaded_order_files:
-            downloaded = OseoFile.objects.filter(available=True,
-                                                 downloads__gt=0,
-                                                 order_item__batch=self)
-            downloaded = list(downloaded)  # forcing evaluation of the queryset
-            expired.extend(downloaded)
-        return list(set(expired))
-
     def create_order_item(self, status, additional_status_info,
                           order_item_spec):
         item = OrderItem(
@@ -837,7 +824,7 @@ class OrderItem(CustomizableItem):
                                   help_text="identifier for this order item. "
                                             "It is the product Id in the "
                                             "catalog")
-    item_id = models.CharField(max_length=30, help_text="Id for the item in "
+    item_id = models.CharField(max_length=80, help_text="Id for the item in "
                                                         "the order request")
 
     def export_options(self):
