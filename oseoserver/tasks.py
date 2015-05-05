@@ -260,6 +260,23 @@ def delete_oseo_file(self, oseo_file_id):
             oseo_file.save()
 
 
+@shared_task(bind=True)
+def terminate_expired_subscriptions(self):
+    """Terminate subscriptions that are expired
+
+    This task should be run in a celery beat worker with a daily frequency.
+    """
+
+    now = datetime.now(pytz.utc)
+    to_terminate = models.SubscriptionOrder.objects.filter(
+        status=models.CustomizableItem.ACCEPTED,
+        end_on__lt=now.strftime("%Y-%m-%d")
+    )
+    for subscription_order in to_terminate:
+        subscription_order.status = models.CustomizableItem.TERMINATED
+        subscription_order.save()
+
+
 # TODO - Activate this task
 # This is conditional on the existance of a new field in Batches that
 # specifies how many times should a failed batch be retried. There must
