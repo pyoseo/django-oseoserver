@@ -452,7 +452,8 @@ class ItemProcessor(models.Model):
 
     python_path = models.CharField(
         max_length=255,
-        default="oseoserver.orderpreparation.noop.FakeOrderProcessor",
+        default="oseoserver.orderpreparation.exampleorderprocessor."
+                "ExampleOrderProcessor",
         help_text="Python import path to a custom class that is used to "
                   "process the order items. This class must conform to the "
                   "expected interface."

@@ -1,4 +1,4 @@
-# Copyright 2014 Ricardo Garcia Silva
+# Copyright 2015 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -116,6 +116,9 @@ def notify_user_product_batch_available(self, batch_id):
 def process_online_data_access_item(self, order_item_id):
     """
     Process an order item that specifies online data access as delivery.
+
+    This task calls the user defined ItemProcessor to do the actual processing
+    of order items.
     """
 
     order_item = models.OrderItem.objects.get(pk=order_item_id)
