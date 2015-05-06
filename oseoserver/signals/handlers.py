@@ -1,3 +1,17 @@
+# Copyright 2015 Ricardo Garcia Silva
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+
 import datetime as dt
 import pytz
 
@@ -7,6 +21,7 @@ from django.contrib.auth.models import User
 from actstream import action
 
 import oseoserver.models as models
+import oseoserver.signals.signals as oseoserver_signals
 
 
 @receiver(post_save, sender=User, weak=False,
@@ -47,6 +62,12 @@ def update_status_changed_on_order(sender, **kwargs):
     if order.status_changed_on is None or \
             order.status != order.old_status:
         order.status_changed_on = dt.datetime.now(pytz.utc)
+        oseoserver_signals.order_status_changed.send_robust(
+            sender=sender,
+            instance=order,
+            old_status=order.old_status,
+            new_status=order.status
+        )
 
 
 @receiver(post_init, sender=models.OrderItem, weak=False,
@@ -154,3 +175,13 @@ def notify_subscription_batch(sender, **kwargs):
     batch = kwargs["instance"]
     if kwargs["created"]:
         action.send(batch, verb="created")
+
+
+@receiver(oseoserver_signals.order_status_changed, weak=False,
+          dispatch_uid="id_for_notify_order_status_changed")
+def notify_order_status_changed(sender, **kwargs):
+    order = kwargs["order"]
+    old = kwargs["old_status"]
+    new = kwargs["new_status"]
+    print("Order {}'s status changed from {} to "
+          "{}".format(order, old, new))
