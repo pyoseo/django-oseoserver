@@ -241,6 +241,12 @@ class Collection(models.Model):
         help_text="The price of an individual product",
         default=Decimal(0)
     )
+    generation_frequency = models.CharField(
+        max_length=255,
+        help_text="Frequency at which new products get generated",
+        blank=True,
+        default="once per hour"
+    )
 
     def _product_orders_enabled(self):
         return "enabled" if self.productorderconfiguration.enabled \
