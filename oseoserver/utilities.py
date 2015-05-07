@@ -128,6 +128,12 @@ def send_subscription_moderated_email(order, approved, recipients,
 
     collections = [i.collection for i in
                    order.batches.first().order_items.all()]
+    collections = []
+    for item in order.batches.first().order_items.all():
+        collections.append((i.collection, i.selected_options.all()))
+
+
+
     template = "subscription_moderated.html"
     context = {
         "order": order,

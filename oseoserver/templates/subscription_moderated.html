@@ -1,27 +1,52 @@
+<h1>Copernicus Global Land Service</h1>
 <h3>Subscription Order {{ order.id }} has been {{ order.status|lower }}</h3>
 
 {% if approved %}
     <p>Collections:
         <ul>
-            {% for collection in collections %}
-            <li>{{ collection.name }}</li>
+            {% for collection, options in collections %}
+            <li>
+                <strong>{{ collection.name }}</strong>
+                <ul>
+                    <li>
+                        New products are generated: <em>{{ collection.generation_frequency }}</em>
+                    </li>
+                    {% for opt in options %}
+                        <li>{{ opt.option.name }}: <em>{{ opt.value }}</em></li>
+                    {% endfor %}
+                </ul>
+            </li>
             {% endfor %}
         </ul>
     </p>
+    <p>The ordered products will become available for download at your space
+        at IPMA's FTP server as soon as they are generated. Please visit:</p>
+    <p>ftp://[username]:[password]@geoland2.ipma.pt</p>
+    <p>Where <em>[username]</em> and <em>[password]</em> correspond to your
+        user credentials at the Copernicus Global Land access portal.</p>
+    <p>Please note that <em>each file will be accessible for a
+        minimum of {{ order.order_type.item_availability_days }} days</em>.
+        After a file expires it may be deleted according to the server's
+        maintenance needs.
+    </p>
+    <p>This subscription begins on
+    <em>{{ order.derivedorder.subscriptionorder.begin_on }}</em> and
+        will be active until
+    <em>{{ order.derivedorder.subscriptionorder.end_on }}</em>. It
+        can be cancelled by visiting Copernicus Global Land's access
+        portal at:</p>
 
-<p>New order batches will become available for download as soon as products
-get generated.</p>
-
-<p>This subscription begins on
-<strong>{{ order.derivedorder.subscriptionorder.begin_on }}</strong> and will
-be active until
-<strong>{{ order.derivedorder.subscriptionorder.end_on }}</strong>. It can be
-cancelled by visiting Copernicus Global Land's access page at:</p>
-
-<p><a href="http://land.copernicus.eu/global/access">http://land.copernicus.eu/global/access</a></p>
+    <p><a href="http://land.copernicus.eu/global/access">http://
+        land.copernicus.eu/global/access</a></p>
 
 {% else %}
-<p>Additional details:</p>
-<p>{{ details }}</p>
+    <p>Additional details:</p>
+    <p>{{ details }}</p>
 
 {% endif %}
+
+<p>If you have further inquiries regarding IPMA's Copernicus Global Land
+    service please contact the helpdesk at
+    <a href="mailto:helpdesk.copernicus@ipma.pt">helpdesk.copernicus@ipma.pt</a>
+</p>
+
