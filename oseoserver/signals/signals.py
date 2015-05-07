@@ -18,5 +18,18 @@ Custom django signals for oseoserver
 
 from django.dispatch import Signal
 
+# TODO - Implement signals for the following:
+#order_request_received
+#order_waiting_moderation
+#subscription_accepted
+#subscription_terminated
+#batch_completed
+#order_item_completed
+#order_completed
+#order_item_failed
+#batch_failed
+#order_failed
+
 order_status_changed = Signal(
     providing_args=["instance", "old_status", "new_status"])
+
