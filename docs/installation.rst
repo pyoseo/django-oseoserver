@@ -5,6 +5,23 @@ Installation
 ------------
 
 * Create a new django project or start with an existing one
+* Install pyxb with the OGC schema bindings
+
+  .. code:: bash
+
+     # download, build and install pyxb with the OGC schemas
+     pip install --download $PIP_DOWNLOAD_CACHE pyxb
+     BUILD_DIR=$HOME/build
+     mkdir -p $BUILD_DIR
+     PYXB_ARCHIVE=$(ls $PIP_DOWNLOAD_CACHE | grep -i "^pyxb")
+     tar --directory=$BUILD_DIR -xvf $PIP_DOWNLOAD_CACHE/$PYXB_ARCHIVE
+     cd $BUILD_DIR/$(ls $BUILD_DIR)
+     export PYXB_ROOT=$(pwd)
+     pyxb/bundles/opengis/scripts/genbind
+     python setup.py install
+     cd -
+     rm -rf $BUILD_DIR
+
 * Download the `django-oseoserver` package and install it
 * Add `oseoserver` to installed_apps
 * Add the following oseoserver dependencies to installed_apps (they have
