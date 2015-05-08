@@ -95,9 +95,9 @@ class OrderAdmin(admin.ModelAdmin):
     inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,)
     fieldsets = (
         (None, {
-            'fields': ('order_type', 'status', 'status_changed_on',
-                       'completed_on', 'user', 'reference', 'priority',
-                       'packaging',)
+            'fields': ('order_type', 'status', 'status_notification',
+                       'status_changed_on', 'completed_on', 'user',
+                       'reference', 'priority', 'packaging',)
         }),
         ('Further info', {
             'classes': ('collapse',),

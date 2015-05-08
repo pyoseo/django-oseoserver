@@ -179,9 +179,8 @@ class Batch(models.Model):
         return items_status
 
     def get_completed_files(self, behaviour):
-        order = self.order
-        last_time = order.last_describe_result_access_request
-        order_delivery = order.selected_delivery_option.option
+        last_time = self.order.last_describe_result_access_request
+        order_delivery = self.order.selected_delivery_option.option
         completed = []
         if self.status() != CustomizableItem.COMPLETED:
             # batch is either still being processed,
@@ -204,7 +203,7 @@ class Batch(models.Model):
                                      oi.completed_on >= last_time):
                         for f in oi.files.filter(available=True):
                             batch_complete_items.append((f, delivery))
-            if order.packaging == Order.ZIP:
+            if self.order.packaging == Order.ZIP:
                 if len(batch_complete_items) == len(order_items):
                     # the zip is ready, lets get only a single file
                     # because they all point to the same URL

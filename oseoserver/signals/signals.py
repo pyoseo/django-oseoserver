@@ -33,3 +33,11 @@ from django.dispatch import Signal
 order_status_changed = Signal(
     providing_args=["instance", "old_status", "new_status"])
 
+order_submitted = Signal(providing_args=["instance"])
+order_accepted = Signal(providing_args=["instance"])
+order_in_production = Signal(providing_args=["instance"])
+order_failed = Signal(providing_args=["instance"])
+order_completed = Signal(providing_args=["instance"])
+order_downloaded = Signal(providing_args=["instance"])
+order_cancelled = Signal(providing_args=["instance"])
+order_terminated = Signal(providing_args=["instance"])

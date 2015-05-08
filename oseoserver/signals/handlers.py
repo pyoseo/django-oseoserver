@@ -21,7 +21,9 @@ from django.contrib.auth.models import User
 from actstream import action
 
 import oseoserver.models as models
-import oseoserver.signals.signals as oseoserver_signals
+from oseoserver.models import CustomizableItem as ci
+import oseoserver.signals.signals as signals
+import oseoserver.utilities
 
 
 @receiver(post_save, sender=User, weak=False,
@@ -44,6 +46,8 @@ def add_user_profile_callback(sender, **kwargs):
           dispatch_uid='id_for_get_old_status_massive_order')
 @receiver(post_init, sender=models.ProductOrder, weak=False,
           dispatch_uid='id_for_get_old_status_product_order')
+@receiver(post_init, sender=models.Order, weak=False,
+          dispatch_uid='id_for_get_old_status_order')
 def get_old_status_order(sender, **kwargs):
     order = kwargs['instance']
     order.old_status = order.status
@@ -57,17 +61,37 @@ def get_old_status_order(sender, **kwargs):
           dispatch_uid='id_for_update_status_changed_on_massive_order')
 @receiver(pre_save, sender=models.ProductOrder, weak=False,
           dispatch_uid='id_for_update_status_changed_on_product_order')
+@receiver(pre_save, sender=models.Order, weak=False,
+          dispatch_uid='id_for_update_status_changed_on_order')
 def update_status_changed_on_order(sender, **kwargs):
     order = kwargs['instance']
     if order.status_changed_on is None or \
             order.status != order.old_status:
         order.status_changed_on = dt.datetime.now(pytz.utc)
-        oseoserver_signals.order_status_changed.send_robust(
+        signals.order_status_changed.send_robust(
             sender=sender,
             instance=order,
             old_status=order.old_status,
             new_status=order.status
         )
+        if order.status == ci.SUBMITTED:
+            signals.order_submitted.send_robust(sender=sender, instance=order)
+        elif order.status == ci.ACCEPTED:
+            signals.order_accepted.send_robust(sender=sender, instance=order)
+        elif order.status == ci.IN_PRODUCTION:
+            signals.order_in_production.send_robust(sender=sender,
+                                                    instance=order)
+        elif order.status == ci.FAILED:
+            signals.order_failed.send_robust(sender=sender, instance=order)
+        elif order.status == ci.COMPLETED:
+            signals.order_completed.send_robust(sender=sender, instance=order)
+        elif order.status == ci.DOWNLOADED:
+            signals.order_downloaded.send_robust(sender=sender, instance=order)
+        elif order.status == ci.CANCELLED:
+            signals.order_cancelled.send_robust(sender=sender, instance=order)
+        elif order.status == ci.TERMINATED:
+            signals.order_terminated.send_robust(sender=sender, instance=order)
+        order.old_status = order.status
 
 
 @receiver(post_init, sender=models.OrderItem, weak=False,
@@ -177,11 +201,44 @@ def notify_subscription_batch(sender, **kwargs):
         action.send(batch, verb="created")
 
 
-@receiver(oseoserver_signals.order_status_changed, weak=False,
-          dispatch_uid="id_for_notify_order_status_changed")
-def notify_order_status_changed(sender, **kwargs):
-    order = kwargs["order"]
+@receiver(signals.order_status_changed, weak=False,
+          dispatch_uid='id_for_handle_order_status_change')
+def handle_order_status_change(sender, **kwargs):
+    """Handle OSEO notifications to the user whenever an order changes status
+
+    This handler should delegate to the appropriate OSEO async operation class
+    (something which is not implemented yet)
+    """
+
+    order = kwargs["instance"]
     old = kwargs["old_status"]
     new = kwargs["new_status"]
-    print("Order {}'s status changed from {} to "
-          "{}".format(order, old, new))
+    if order.status_notification == models.Order.ALL:
+        # send and OSEO notification
+        print("Order {} status has changed from {} to {}".format(order,
+                                                                 old, new))
+    elif order.status_notification == models.Order.FINAL:
+        final_statuses = [ci.CANCELLED, ci.COMPLETED, ci.FAILED, ci.TERMINATED]
+        if new in final_statuses:
+            # send an OSEO notification
+            print("Order {} has reached a FINAL status of {}".format(order,
+                                                                     old))
+
+
+@receiver(signals.order_submitted, weak=False,
+          dispatch_uid='id_for_handle_order_submission')
+def handle_order_submission(sender, **kwargs):
+    order = kwargs["instance"]
+    if order.status == ci.SUBMITTED and not order.order_type.automatic_approval:
+        # send the email asking admins to moderate the order
+        print("Order {} must be moderated by an admin before continuing to "
+              "be processed".format(order))
+
+
+@receiver(signals.order_failed, weak=False,
+          dispatch_uid='id_for_handle_order_failure')
+def handle_order_failure(sender, **kwargs):
+    order = kwargs["instance"]
+    if order.status == ci.FAILED:
+        # send an email to the admin warning that the order has failed
+        print("Order {} has failed.".format(order))

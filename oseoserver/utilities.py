@@ -191,17 +191,18 @@ def send_email(subject, message, recipients, html=False):
         except AttributeError:
             # recipient is an OseoUser
             address = recipient.user.email
-        msg = MailerMessage(
-            subject=subject,
-            to_address=address,
-            from_address=settings.EMAIL_HOST_USER,
-            app="oseoserver"
-        )
-        if html:
-            msg.html_content = message
-        else:
-            msg.content = message
-        msg.save()
+        if address != "":
+            msg = MailerMessage(
+                subject=subject,
+                to_address=address,
+                from_address=settings.EMAIL_HOST_USER,
+                app="oseoserver"
+            )
+            if html:
+                msg.html_content = message
+            else:
+                msg.content = message
+            msg.save()
 
 def _c(value):
     """
