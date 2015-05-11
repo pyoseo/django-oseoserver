@@ -326,6 +326,10 @@ class OseoServer(object):
                 order.id))
             tasks.process_product_order.apply_async((order.id,))
 
+    # the code that checks the value of the email notification extension
+    # does not belong in oseoserver. This could be simplified by
+    # sending custom notification e-mails as a response to a signal
+    #sent whenever there is a status change
     def dispatch_subscription_order(self, order, timeslot, collection):
         """Create a new subscription batch and send it to the processing queue.
 
@@ -356,7 +360,20 @@ class OseoServer(object):
                 order_item.files.all().delete()
             batch.updated_on = datetime.utcnow()
             batch.save()
-        tasks.process_subscription_order_batch.apply_async((batch.id,))
+
+        notify_user = False
+        try:
+            extension = order.extension_set.get(
+                xml_fragment__icontains="emailnotification")
+            processor, params = utilities.get_processor(
+                order.order_type, models.ItemProcessor.PROCESSING_PARSE_OPTION)
+            value = processor.parse_extension(extension.xml_fragment)
+            if value.upper() == "EACH":
+                notify_user = True
+        except models.Extension.DoesNotExist:
+            pass
+        tasks.process_subscription_order_batch.apply_async(
+            (batch.id,), {"notify_user": notify_user})
 
     def process_subscription_orders(self, timeslot, collections=None,
                                     order_id=None):
