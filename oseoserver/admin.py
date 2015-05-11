@@ -33,6 +33,10 @@ class SelectedOptionInline(admin.StackedInline):
     extra = 1
 
 
+class ExtensionInline(admin.StackedInline):
+    model = models.Extension
+    extra = 1
+
 class SelectedDeliveryOptionInline(admin.StackedInline):
     model = models.SelectedDeliveryOption
     extra = 1
@@ -92,7 +96,8 @@ class OseoUserAdmin(admin.ModelAdmin):
 
 @admin.register(models.Order)
 class OrderAdmin(admin.ModelAdmin):
-    inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,)
+    inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,
+               ExtensionInline)
     fieldsets = (
         (None, {
             'fields': ('order_type', 'status', 'status_notification',

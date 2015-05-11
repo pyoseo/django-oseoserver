@@ -24,6 +24,7 @@ from django.conf import settings
 from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.models import User
+from lxml import etree
 import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
@@ -362,6 +363,17 @@ class CustomizableItem(models.Model):
         except SelectedDeliveryOption.DoesNotExist:
             dot = None
         return dot
+
+
+class Extension(models.Model):
+
+    item = models.ForeignKey(CustomizableItem)
+    xml_fragment = models.TextField(
+        help_text="Custom extensions to the OSEO standard")
+
+    def __unicode__(self):
+        element = etree.fromstring(self.xml_fragment)
+        return "{}: {}".format(element.tag, element.text)
 
 
 class DeliveryInformation(AbstractDeliveryAddress):
