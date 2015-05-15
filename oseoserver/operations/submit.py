@@ -17,7 +17,8 @@ Implements the OSEO Submit operation
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 
 from django.db import transaction
 from pyxb import BIND
@@ -125,6 +126,7 @@ class Submit(OseoOperation):
         )
         spec["delivery_options"] = self._validate_global_delivery_options(
             order_specification, spec["requested_order_configurations"])
+        spec["extension"] = [e for e in order_specification.extension]
         return spec
 
     def create_order(self, order_spec, user, status_notification, status,
@@ -155,11 +157,16 @@ class Submit(OseoOperation):
         elif order_spec["order_type"].name == models.Order.MASSIVE_ORDER:
             order = models.MassiveOrder(**general_params)
         elif order_spec["order_type"].name == models.Order.SUBSCRIPTION_ORDER:
-            #FIXME - get start and end time for subscriptions from the request
-            begin_on = datetime(2015, 1, 1)
-            end_on = datetime(2030, 12, 23)
-            order = models.SubscriptionOrder(begin_on=begin_on, end_on=end_on,
-                                             **general_params)
+            order = models.SubscriptionOrder(**general_params)
+            processor, params = utilities.get_processor(
+                order.order_type,
+                models.ItemProcessor.PROCESSING_PROCESS_ITEM,
+                logger_type="pyoseo"
+            )
+            begin, end = processor.get_subscription_duration(order_spec)
+            now = datetime.now(pytz.utc)
+            order.begin_on = begin or now
+            order.end_on = end or now + timedelta(days=365 * 10)  # ten years
         else:
             order = models.TaskingOrder(**general_params)
         order.save()
@@ -192,6 +199,9 @@ class Submit(OseoOperation):
             item_additional_status_info,
             *order_spec["order_item"]
         )
+        for ext in order_spec["extension"]:
+            e = models.Extension(item=order, text=ext)
+            e.save()
         return order
 
     def get_delivery_information(self, requested_delivery_info):

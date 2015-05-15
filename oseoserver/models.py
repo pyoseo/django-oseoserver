@@ -368,12 +368,13 @@ class CustomizableItem(models.Model):
 class Extension(models.Model):
 
     item = models.ForeignKey(CustomizableItem)
-    xml_fragment = models.TextField(
-        help_text="Custom extensions to the OSEO standard")
+    text = models.CharField(
+        max_length=255, blank=True,
+        help_text="Custom extensions to the OSEO standard"
+    )
 
     def __unicode__(self):
-        element = etree.fromstring(self.xml_fragment)
-        return "{}: {}".format(element.tag, element.text)
+        return self.text
 
 
 class DeliveryInformation(AbstractDeliveryAddress):
