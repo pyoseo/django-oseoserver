@@ -364,10 +364,10 @@ class OseoServer(object):
         notify_user = False
         try:
             extension = order.extension_set.get(
-                xml_fragment__icontains="emailnotification")
+                text__icontains="emailnotification")
             processor, params = utilities.get_processor(
                 order.order_type, models.ItemProcessor.PROCESSING_PARSE_OPTION)
-            value = processor.parse_extension(extension.xml_fragment)
+            nam, value = processor.parse_extension(extension.text)
             if value.upper() == "EACH":
                 notify_user = True
         except models.Extension.DoesNotExist:
@@ -464,9 +464,6 @@ class OseoServer(object):
         try:
             col_item = subscription_spec_batch.order_items.get(
                 collection=collection)
-            col_item_options = col_item.selected_options.all()
-            col_item_scene_options = \
-                col_item.selected_scene_selection_options.all()
             try:
                 col_item_payment_option = col_item.selected_payment_option
             except models.SelectedPaymentOption.DoesNotExist:
@@ -491,8 +488,11 @@ class OseoServer(object):
                 new_batch.id,
                 new_item.identifier
             )
-            new_item.selected_options = col_item_options
-            new_item.selected_scene_selection_options = col_item_scene_options
+            cloned_options = self._clone_item_options(col_item)
+            cloned_scene_options = self._clone_item_scene_selection_options(
+                col_item)
+            new_item.selected_options = cloned_options
+            new_item.selected_scene_selection_options = cloned_scene_options
             if col_item_payment_option is not None:
                 new_item.selected_payment_option = col_item_payment_option
             if col_item_delivery_option is not None:
@@ -502,7 +502,23 @@ class OseoServer(object):
             new_item.save()
         new_batch.save()
 
+    def _clone_item_options(self, item):
+        cloned_options = []
+        for i in item.selected_options.all():
+            i.pk = None
+            i.id = None
+            i.save()
+            cloned_options.append(i)
+        return cloned_options
 
+    def _clone_item_scene_selection_options(self, item):
+        cloned_scene_options = []
+        for i in item.selected_scene_selection_options.all():
+            i.pk = None
+            i.id = None
+            i.save()
+            cloned_scene_options.append(i)
+        return cloned_scene_options
 
     def _get_operation(self, pyxb_request):
         oseo_op = pyxb_request.toDOM().firstChild.tagName.partition(":")[-1]
