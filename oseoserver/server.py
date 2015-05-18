@@ -475,6 +475,9 @@ class OseoServer(object):
         except models.Collection.DoesNotExist:
             raise errors.ServerError("Invalid collection: "
                                      "{}".format(collection))
+        selected_options = col_item.selected_options.all()
+        selected_scene_options = \
+            col_item.selected_scene_selection_options.all()
         # django way of cloning model instances is to set the pk and id to None
         for ident in order_item_identifiers:
             new_item = col_item
@@ -488,11 +491,9 @@ class OseoServer(object):
                 new_batch.id,
                 new_item.identifier
             )
-            cloned_options = self._clone_item_options(col_item)
-            cloned_scene_options = self._clone_item_scene_selection_options(
-                col_item)
-            new_item.selected_options = cloned_options
-            new_item.selected_scene_selection_options = cloned_scene_options
+            self._clone_item_options(selected_options[:], new_item)
+            self._clone_item_scene_selection_options(
+                selected_scene_options[:], new_item)
             if col_item_payment_option is not None:
                 new_item.selected_payment_option = col_item_payment_option
             if col_item_delivery_option is not None:
@@ -502,23 +503,21 @@ class OseoServer(object):
             new_item.save()
         new_batch.save()
 
-    def _clone_item_options(self, item):
-        cloned_options = []
-        for i in item.selected_options.all():
-            i.pk = None
-            i.id = None
-            i.save()
-            cloned_options.append(i)
-        return cloned_options
+    def _clone_item_options(self, existing_options, new_item):
+        for op in existing_options:
+            op.pk = None
+            op.id = None
+            op.save()
+            new_item.selected_options.add(op)
 
-    def _clone_item_scene_selection_options(self, item):
-        cloned_scene_options = []
-        for i in item.selected_scene_selection_options.all():
-            i.pk = None
-            i.id = None
-            i.save()
-            cloned_scene_options.append(i)
-        return cloned_scene_options
+    def _clone_item_scene_selection_options(self,
+                                            existing_scene_selection_options,
+                                            new_item):
+        for op in existing_scene_selection_options:
+            op.pk = None
+            op.id = None
+            op.save()
+            new_item.selected_scene_selection_options.add(op)
 
     def _get_operation(self, pyxb_request):
         oseo_op = pyxb_request.toDOM().firstChild.tagName.partition(":")[-1]

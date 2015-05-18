@@ -117,6 +117,10 @@ def process_online_data_access_item(self, order_item_id):
     """
     Process an order item that specifies online data access as delivery.
 
+    :arg order_item_id: The id of the order item that is to be processed. It
+        corresponds to the primary key of the object in the database.
+    :type order_item_id: int
+
     This task calls the user defined ItemProcessor to do the actual processing
     of order items.
     """
