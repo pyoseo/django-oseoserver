@@ -17,6 +17,7 @@ Contents:
    installation
    configuration
    celery
+   customprocessing
 
 
 
