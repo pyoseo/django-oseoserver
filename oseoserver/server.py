@@ -349,9 +349,11 @@ class OseoServer(object):
                 models.ItemProcessor.PROCESSING_PROCESS_ITEM,
                 logger_type="pyoseo"
             )
-            identifiers = processor.get_subscription_batch_identifiers(
-                timeslot, collection, **params)
             spec = order.batches.first()
+            spec_item = spec.order_items.get(collection=collection)
+            requested_options = spec_item.export_options()
+            identifiers = processor.get_subscription_batch_identifiers(
+                timeslot, collection.name, requested_options, **params)
             self._clone_subscription_batch(identifiers, spec, timeslot,
                                            collection, batch)
             order.save()

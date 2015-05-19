@@ -11,12 +11,12 @@ options. This processing class must implement the following interface:
 
 .. py:method:: get_subscription_batch_identifiers(timeslot, collection, options, **params)
 
-   :arg timeslot: the timeslot for the subscription batch that will be created
+   :arg timeslot: The timeslot for the subscription batch that will be created
    :type timeslot: datetime.datetime
-   :arg collection: the collection that is being ordered
-   :type collection: oseoserver.models.Collection
-   :arg options: any custom ordering options that may have been requested at
-       the time the subscription was created
+   :arg collection: The collection that is being ordered
+   :type collection: basestring
+   :arg options: Any custom ordering options that may have been requested at
+       the time the subscription was created.
    :type options: dict
    :return: A list of order item identifiers that is used to create order items
        for the current subscription batch
