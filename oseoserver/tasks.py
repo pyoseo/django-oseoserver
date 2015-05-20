@@ -217,23 +217,15 @@ def update_product_order_status(self, order_id):
             order.completed_on = dt.datetime.now(pytz.utc)
             order.additional_status_info = ""
         elif new_order_status == models.CustomizableItem.FAILED:
-            msg = ""
+            details = []
             for oi in batch.order_items.all():
                 if oi.status == models.CustomizableItem.FAILED:
                     additional = oi.additional_status_info
-                    msg = "\n\t".join(
-                        (
-                            msg,
-                             "* Order item {}: {}".format(oi.id,
-                                                          additional)
-                        ),
-                    )
-            order.additional_status_info = ("Order {} has "
-                                            "failed.{}".format(order.id,
-                                                               msg))
-            utilities.send_order_failed_email(order, details=msg)
+                    details.append((oi.id, additional))
+            msg = "\n".join(["* Order item {}: {}".format(oi, det) for
+                             oi, det in details])
+            order.additional_status_info = msg
         order.save()
-
 
 
 @shared_task(bind=True)

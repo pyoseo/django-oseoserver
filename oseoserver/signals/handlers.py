@@ -18,6 +18,7 @@ import pytz
 from django.dispatch import receiver
 from django.db.models.signals import post_save, post_init, pre_save
 from django.contrib.auth.models import User
+from django.template.loader import render_to_string
 from actstream import action
 
 import oseoserver.models as models
@@ -238,7 +239,29 @@ def handle_order_submission(sender, **kwargs):
 @receiver(signals.order_failed, weak=False,
           dispatch_uid='id_for_handle_order_failure')
 def handle_order_failure(sender, **kwargs):
+    """Notify the staff by e-mail that an order has failed
+
+    :param sender:
+    :param kwargs:
+    :return:
+    """
+
     order = kwargs["instance"]
     if order.status == ci.FAILED:
-        # send an email to the admin warning that the order has failed
         print("Order {} has failed.".format(order))
+        details = [d.replace("* Order item ", "").split(":") for d in
+                   order.additional_status_info.split("\n")]
+        template = "order_failed.html"
+        context = {
+            "order": order,
+            "details": details,
+        }
+        msg = render_to_string(template, context)
+        subject = ("Copernicus Global Land Service - Order {} has "
+                   "failed".format(order))
+        recipients = User.objects.filter(is_staff=True).exclude(email="")
+        oseoserver.utilities.send_email(subject, msg, recipients, html=True)
+
+
+
+

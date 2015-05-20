@@ -1,0 +1,9 @@
+<h3>Order {{ order }} has failed</h3>
+<p>The following details are available:</p>
+<p>
+    <ul>
+        {% for order_item_id, detail in details %}
+            <li>Order item {{ order_item_id }}: {{ detail }}</li>
+        {% endfor %}
+    </ul>
+</p>
