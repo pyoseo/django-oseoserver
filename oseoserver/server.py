@@ -58,6 +58,7 @@ import models
 import errors
 import utilities
 from auth.usernametoken import UsernameTokenAuthentication
+from signals import signals
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,9 @@ class OseoServer(object):
             result = self.create_exception_report(err.code, err.text,
                                                   soap_version,
                                                   locator=err.locator)
+            signals.invalid_request.send_robust(sender=self,
+                                                request_data=request_data,
+                                                exception_report=result)
         except errors.NonSoapRequestError as e:
             status_code = 400
             result = e

@@ -14,11 +14,13 @@
 
 import datetime as dt
 import pytz
+from cStringIO import StringIO
 
 from django.dispatch import receiver
 from django.db.models.signals import post_save, post_init, pre_save
 from django.contrib.auth.models import User
 from django.template.loader import render_to_string
+from django.core.files import File
 from actstream import action
 
 import oseoserver.models as models
@@ -263,5 +265,20 @@ def handle_order_failure(sender, **kwargs):
         oseoserver.utilities.send_email(subject, msg, recipients, html=True)
 
 
-
+@receiver(signals.invalid_request, weak=False,
+          dispatch_uid="id_for_handle_invalid_request")
+def handle_invalid_request(sender, **kwargs):
+    print("received invalid request")
+    template = "invalid_request.html"
+    request_data = File(StringIO(kwargs["request_data"]),
+                        name="request_data.xml")
+    exception_report = File(StringIO(kwargs["exception_report"]),
+                            name="exception_report.xml")
+    msg = render_to_string(template)
+    subject = ("Copernicus Global Land Service - Received invalid request")
+    recipients = User.objects.filter(is_staff=True).exclude(email="")
+    oseoserver.utilities.send_email(
+        subject, msg, recipients,
+        html=True, attachments=[request_data, exception_report]
+    )
 

@@ -26,6 +26,7 @@ setup(
         "librabbitmq",
         "django-mail-queue",
         "django-sendfile",
+        "html2text",
     ],
     include_package_data=True,
 )

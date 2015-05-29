@@ -30,6 +30,8 @@ from django.dispatch import Signal
 #batch_failed
 #order_failed
 
+invalid_request = Signal(providing_args=["request_data", "exception_report"])
+
 order_status_changed = Signal(
     providing_args=["instance", "old_status", "new_status"])
 

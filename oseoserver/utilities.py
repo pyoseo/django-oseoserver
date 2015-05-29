@@ -25,6 +25,7 @@ from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
 from django.contrib.sites.models import Site
 from mailqueue.models import MailerMessage
+from html2text import html2text
 
 logger = logging.getLogger('.'.join(('pyoseo', __name__)))
 
@@ -157,7 +158,7 @@ def send_product_batch_available_email(batch):
     send_email(subject, msg, recipients, html=True)
 
 
-def send_email(subject, message, recipients, html=False):
+def send_email(subject, message, recipients, html=False, attachments=None):
     for recipient in recipients:
         try:
             # recipient is a User
@@ -173,9 +174,14 @@ def send_email(subject, message, recipients, html=False):
                 app="oseoserver"
             )
             if html:
+                text_content = html2text(message)
+                msg.content = text_content
                 msg.html_content = message
             else:
                 msg.content = message
+            if attachments is not None:
+                for a in attachments:
+                    msg.add_attachment(a)
             msg.save()
 
 def _c(value):
