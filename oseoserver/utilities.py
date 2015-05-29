@@ -159,6 +159,7 @@ def send_product_batch_available_email(batch):
 
 
 def send_email(subject, message, recipients, html=False, attachments=None):
+    already_emailed = []
     for recipient in recipients:
         try:
             # recipient is a User
@@ -166,7 +167,7 @@ def send_email(subject, message, recipients, html=False, attachments=None):
         except AttributeError:
             # recipient is an OseoUser
             address = recipient.user.email
-        if address != "":
+        if address != "" and address not in already_emailed:
             msg = MailerMessage(
                 subject=subject,
                 to_address=address,
@@ -183,6 +184,7 @@ def send_email(subject, message, recipients, html=False, attachments=None):
                 for a in attachments:
                     msg.add_attachment(a)
             msg.save()
+            already_emailed.append(address)
 
 def _c(value):
     """
