@@ -134,7 +134,7 @@ def process_online_data_access_item(self, order_item_id):
         processor, params = utilities.get_processor(
             order.order_type,
             models.ItemProcessor.PROCESSING_PROCESS_ITEM,
-            logger_type="pyoseo"
+            logger_type="celery"
         )
         options = order_item.export_options()
         delivery_options = order_item.export_delivery_options()
