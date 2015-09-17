@@ -144,7 +144,6 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
     error_details = ""
     while current_try < max_tries and not item_processed:
         try:
-            raise Exception("fakeError")
             order = order_item.batch.order
             processor, params = utilities.get_processor(
                 order.order_type,
