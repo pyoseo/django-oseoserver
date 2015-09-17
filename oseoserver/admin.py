@@ -186,7 +186,8 @@ class OrderItemAdmin(admin.ModelAdmin):
         }),
     )
     list_display = ('id', 'item_id', 'link_to_batch', 'link_to_order',
-                    'status', 'status_changed_on', 'additional_status_info',)
+                    'identifier', 'status', 'status_changed_on',
+                    'additional_status_info',)
     list_filter = ('batch__order', 'status',)
     search_fields = ("batch__order__id", "item_id", "identifier",)
     date_hierarchy = 'status_changed_on'
