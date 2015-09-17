@@ -27,6 +27,8 @@ The celery worker can be started with the command:
 #   and communicate with the database over HTTP. This allows the task to
 #   run somewhere else, instead of having it in the same machine
 
+from __future__ import division
+import time
 import datetime as dt
 from datetime import datetime, timedelta
 
@@ -113,13 +115,20 @@ def notify_user_product_batch_available(self, batch_id):
 
 
 @shared_task(bind=True)
-def process_online_data_access_item(self, order_item_id):
+def process_online_data_access_item(self, order_item_id, max_tries=6,
+                                    sleep_interval=30):
     """
     Process an order item that specifies online data access as delivery.
 
     :arg order_item_id: The id of the order item that is to be processed. It
         corresponds to the primary key of the object in the database.
     :type order_item_id: int
+    :arg max_tries: How many times should the processing of the item be
+        attempted if it fails?
+    :type max_tries: int
+    :arg sleep_interval: How long (in seconds) should the server wait before
+        attempting another execution?
+    :type sleep_interval: int
 
     This task calls the user defined ItemProcessor to do the actual processing
     of order items.
@@ -129,44 +138,56 @@ def process_online_data_access_item(self, order_item_id):
     order_item.status = models.CustomizableItem.IN_PRODUCTION
     order_item.additional_status_info = "Item is being processed"
     order_item.save()
-    try:
-        order = order_item.batch.order
-        processor, params = utilities.get_processor(
-            order.order_type,
-            models.ItemProcessor.PROCESSING_PROCESS_ITEM,
-            logger_type="celery"
-        )
-        options = order_item.export_options()
-        delivery_options = order_item.export_delivery_options()
-        urls, details = processor.process_item_online_access(
-            order_item.identifier, order_item.item_id, order.id,
-            order.user.user.username, options, delivery_options,
-            domain=Site.objects.get_current().domain,
-            sub_uri=django_settings.SITE_SUB_URI,
-            **params)
-        order_item.additional_status_info = details
-        if any(urls):
-            now = datetime.now(pytz.utc)
-            expiry_date = now + timedelta(
-                days=order.order_type.item_availability_days)
-            order_item.status = models.CustomizableItem.COMPLETED
-            order_item.completed_on = now
-            for url in urls:
-                f = models.OseoFile(url=url, available=True,
-                                    order_item=order_item,
-                                    expires_on=expiry_date)
-                f.save()
-        else:
+    current_try = 0
+    item_processed = False
+    while current_try < max_tries and not item_processed:
+        try:
+            order = order_item.batch.order
+            processor, params = utilities.get_processor(
+                order.order_type,
+                models.ItemProcessor.PROCESSING_PROCESS_ITEM,
+                logger_type="celery"
+            )
+            options = order_item.export_options()
+            delivery_options = order_item.export_delivery_options()
+            urls, details = processor.process_item_online_access(
+                order_item.identifier, order_item.item_id, order.id,
+                order.user.user.username, options, delivery_options,
+                domain=Site.objects.get_current().domain,
+                sub_uri=django_settings.SITE_SUB_URI,
+                **params)
+            order_item.additional_status_info = details
+            if any(urls):
+                now = datetime.now(pytz.utc)
+                expiry_date = now + timedelta(
+                    days=order.order_type.item_availability_days)
+                order_item.status = models.CustomizableItem.COMPLETED
+                order_item.completed_on = now
+                for url in urls:
+                    f = models.OseoFile(url=url, available=True,
+                                        order_item=order_item,
+                                        expires_on=expiry_date)
+                    f.save()
+                item_processed = True
+            else:
+                order_item.status = models.CustomizableItem.FAILED
+                logger.error('THERE HAS BEEN AN ERROR: order item {} has '
+                             'failed'.format(order_item_id))
+        except Exception as e:
             order_item.status = models.CustomizableItem.FAILED
-            logger.error('THERE HAS BEEN AN ERROR: order item {} has '
-                         'failed'.format(order_item_id))
-    except Exception as e:
-        order_item.status = models.CustomizableItem.FAILED
-        order_item.additional_status_info = str(e)
-        logger.error('THERE HAS BEEN AN ERROR: order item {} has failed '
-                     'with the error: {}'.format(order_item_id, e))
-    finally:
-        order_item.save()
+            order_item.additional_status_info = (
+                str(e) + " Attempt ({}/{})".format(current_try+1, max_tries))
+            logger.error('THERE HAS BEEN AN ERROR: order item {} has failed '
+                         'with the error: {}'.format(order_item_id, e))
+        current_try += 1
+        if not item_processed:
+            logger.critical("Could not process the item ("
+                            "Attempt {}/{})".format(current_try, max_tries))
+            if current_try < max_tries:
+                logger.critical("Trying again in {} "
+                                "minutes...".format(sleep_interval/60))
+                time.sleep(sleep_interval)
+    order_item.save()
 
 
 @shared_task(bind=True)
