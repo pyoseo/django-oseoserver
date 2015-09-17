@@ -139,12 +139,12 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
     order_item.status = models.CustomizableItem.IN_PRODUCTION
     order_item.additional_status_info = "Item is being processed"
     order_item.save()
+    order = order_item.batch.order
     current_try = 0
     item_processed = False
     error_details = ""
     while current_try < max_tries and not item_processed:
         try:
-            order = order_item.batch.order
             processor, params = utilities.get_processor(
                 order.order_type,
                 models.ItemProcessor.PROCESSING_PROCESS_ITEM,
@@ -187,7 +187,7 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
         if not item_processed:
             logger.critical("Could not process the item ("
                             "Attempt {}/{})".format(current_try, max_tries))
-            _send_failed_attempt_email(error_details)
+            _send_failed_attempt_email(order, order_item, error_details)
             if current_try < max_tries:
                 logger.critical("Trying again in {} "
                                 "minutes...".format(sleep_interval/60))
@@ -195,10 +195,13 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
     order_item.save()
 
 
-def _send_failed_attempt_email(message):
+def _send_failed_attempt_email(order, order_item, message):
+    full_message = "Order: {}\n\tOrderItem: {}\n\n\t".format(
+        order.id, order_item.id)
+    full_message += message
     subject = "Copernicus Global Land Service - Unsuccessful processing attempt"
     recipients = User.objects.filter(is_staff=True).exclude(email="")
-    utilities.send_email(subject, message, recipients, html=True)
+    utilities.send_email(subject, full_message, recipients, html=True)
 
 
 @shared_task(bind=True)
