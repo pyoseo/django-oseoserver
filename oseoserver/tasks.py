@@ -35,6 +35,7 @@ from datetime import datetime, timedelta
 import pytz
 from django.conf import settings as django_settings
 from django.contrib.sites.models import Site
+from django.contrib.auth.models import User
 from django.db.models import Q
 from celery import shared_task
 from celery import group, chord, chain
@@ -140,8 +141,10 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
     order_item.save()
     current_try = 0
     item_processed = False
+    error_details = ""
     while current_try < max_tries and not item_processed:
         try:
+            raise Exception("fakeError")
             order = order_item.batch.order
             processor, params = utilities.get_processor(
                 order.order_type,
@@ -174,20 +177,29 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
                 logger.error('THERE HAS BEEN AN ERROR: order item {} has '
                              'failed'.format(order_item_id))
         except Exception as e:
+            error_message = "Attempt ({}/{}). Error: {}.".format(
+                current_try+1, max_tries, str(e))
             order_item.status = models.CustomizableItem.FAILED
-            order_item.additional_status_info = (
-                str(e) + " Attempt ({}/{})".format(current_try+1, max_tries))
+            order_item.additional_status_info = error_message
+            error_details += error_message
             logger.error('THERE HAS BEEN AN ERROR: order item {} has failed '
                          'with the error: {}'.format(order_item_id, e))
         current_try += 1
         if not item_processed:
             logger.critical("Could not process the item ("
                             "Attempt {}/{})".format(current_try, max_tries))
+            _send_failed_attempt_email(error_details)
             if current_try < max_tries:
                 logger.critical("Trying again in {} "
                                 "minutes...".format(sleep_interval/60))
                 time.sleep(sleep_interval)
     order_item.save()
+
+
+def _send_failed_attempt_email(message):
+    subject = "Copernicus Global Land Service - Unsuccessful processing attempt"
+    recipients = User.objects.filter(is_staff=True).exclude(email="")
+    utilities.send_email(subject, message, recipients, html=True)
 
 
 @shared_task(bind=True)
