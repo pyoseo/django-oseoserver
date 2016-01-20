@@ -31,6 +31,8 @@ from __future__ import division
 import time
 import datetime as dt
 from datetime import datetime, timedelta
+import sys
+import traceback
 
 import pytz
 from django.conf import settings as django_settings
@@ -45,7 +47,7 @@ from actstream import action
 from oseoserver import models
 from oseoserver import utilities
 
-logger = get_task_logger('.'.join(('celery', __name__)))
+logger = get_task_logger(__name__)
 
 
 @shared_task(bind=True)
@@ -148,7 +150,6 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
             processor, params = utilities.get_processor(
                 order.order_type,
                 models.ItemProcessor.PROCESSING_PROCESS_ITEM,
-                logger_type="celery"
             )
             options = order_item.export_options()
             delivery_options = order_item.export_delivery_options()
@@ -176,13 +177,15 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
                 logger.error('THERE HAS BEEN AN ERROR: order item {} has '
                              'failed'.format(order_item_id))
         except Exception as e:
+            formatted_tb = traceback.format_exception(*sys.exc_info())
             error_message = "Attempt ({}/{}). Error: {}.".format(
-                current_try+1, max_tries, str(e))
+                current_try+1, max_tries, formatted_tb)
             order_item.status = models.CustomizableItem.FAILED
             order_item.additional_status_info = error_message
             error_details += error_message
-            logger.error('THERE HAS BEEN AN ERROR: order item {} has failed '
-                         'with the error: {}'.format(order_item_id, e))
+            logger.error("THERE HAS BEEN AN ERROR: order item {} has "
+                         "failed with the error: {}".format(order_item_id,
+                                                            formatted_tb))
         current_try += 1
         if not item_processed:
             logger.critical("Could not process the item ("
@@ -199,7 +202,8 @@ def _send_failed_attempt_email(order, order_item, message):
     full_message = "Order: {}\n\tOrderItem: {}\n\n\t".format(
         order.id, order_item.id)
     full_message += message
-    subject = "Copernicus Global Land Service - Unsuccessful processing attempt"
+    subject = ("Copernicus Global Land Service - Unsuccessful processing "
+               "attempt")
     recipients = User.objects.filter(is_staff=True).exclude(email="")
     utilities.send_email(subject, full_message, recipients, html=True)
 
