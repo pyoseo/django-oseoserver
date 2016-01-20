@@ -43,8 +43,7 @@ class Submit(OseoOperation):
 
     @transaction.atomic
     def __call__(self, request, user):
-        """
-        Implements the OSEO Submit operation.
+        """Implements the OSEO Submit operation.
 
         :arg request: The instance with the request parameters
         :type request: pyxb.bundles.opengis.raw.oseo.GetStatusRequestType

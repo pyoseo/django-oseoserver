@@ -195,7 +195,8 @@ class OseoServer(object):
         PyOSEO uses SOAP-WSS UsernameToken Profile v1.0 authentication. The
         specification is available at:
 
-        https://www.oasis-open.org/committees/download.php/16782/wss-v1.1-spec-os-UsernameTokenProfile.pdf
+        https://www.oasis-open.org/committees/download.php/16782/
+            wss-v1.1-spec-os-UsernameTokenProfile.pdf
 
         Request authentication can be customized according to the
         needs of each ordering server. This method plugs into that by
