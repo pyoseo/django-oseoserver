@@ -390,9 +390,12 @@ def _package_batch(batch, compression):
         for item in batch.order_items.all():
             for oseo_file in item.files.all():
                 files_to_package.append(oseo_file.url)
-        packed = processor.package_files(compression, domain,
-                                         file_urls=files_to_package,
-                                         **params)
+        packed = processor.package_files(
+            compression, domain,
+            file_urls=files_to_package,
+            site_name=django_settings.SITE_SUB_URI,
+            **params
+        )
     except Exception as e:
         logger.error("there has been an error packaging the "
                      "batch {}: {}".format(batch, str(e)))
