@@ -18,7 +18,6 @@ setup(
         "celery",
         "django",
         "django-activity-stream",
-        "django-grappelli",
         "django-mail-queue",
         "django-sendfile",
         "html2text",

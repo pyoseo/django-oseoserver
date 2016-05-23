@@ -1,5 +1,5 @@
-"""
-Load initial data into pyoseo
+"""Load initial data for oseoserver.
+
 """
 
 from django.core.management import BaseCommand

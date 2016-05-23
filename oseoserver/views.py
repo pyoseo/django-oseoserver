@@ -1,3 +1,4 @@
+from __future__ import absolute_import
 import os
 import os.path
 from datetime import datetime
@@ -8,25 +9,25 @@ from django.shortcuts import get_object_or_404, get_list_or_404
 from django.views.decorators.csrf import csrf_exempt
 from sendfile import sendfile
 
-from . import server
+from .server import OseoServer
 from . import models
 from . import utilities
 
 
 @csrf_exempt
 def oseo_endpoint(request):
-    """
-    Django's endpoint to pyoseo.
+    """OSEO endpoint.
 
     This view receives the HTTP request from the webserver's WSGI handler.
     It is responsible for validating that a POST request was received,
     instantiating :class:`oseoserver.server.OseoServer` and handing it
     the request. It then returns the response back to the web server.
+
     """
 
     if request.method == 'POST':
-        s = server.OseoServer()
-        resp, status_code, headers = s.process_request(request.body)
+        server = OseoServer()
+        resp, status_code, headers = server.process_request(request.body)
         response = HttpResponse(resp)
         for k, v in headers.iteritems():
             response[k] = v

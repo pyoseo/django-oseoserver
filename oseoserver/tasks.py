@@ -28,24 +28,22 @@ The celery worker can be started with the command:
 #   run somewhere else, instead of having it in the same machine
 
 from __future__ import division
-import time
-import datetime as dt
+from __future__ import absolute_import
 from datetime import datetime, timedelta
 import sys
+import time
 import traceback
 
-import pytz
-from django.conf import settings as django_settings
-from django.contrib.sites.models import Site
-from django.contrib.auth.models import User
-from django.db.models import Q
 from celery import shared_task
 from celery import group, chord, chain
 from celery.utils.log import get_task_logger
-from actstream import action
+from django.conf import settings as django_settings
+from django.contrib.sites.models import Site
+from django.contrib.auth.models import User
+import pytz
 
-from oseoserver import models
-from oseoserver import utilities
+from . import models
+from . import utilities
 
 logger = get_task_logger(__name__)
 
@@ -253,7 +251,7 @@ def update_product_order_status(self, order_id):
                     old_order_status == models.CustomizableItem.FAILED:
         order.status = new_order_status
         if new_order_status == models.CustomizableItem.COMPLETED:
-            order.completed_on = dt.datetime.now(pytz.utc)
+            order.completed_on = datetime.now(pytz.utc)
             order.additional_status_info = ""
         elif new_order_status == models.CustomizableItem.FAILED:
             details = []

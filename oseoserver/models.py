@@ -16,21 +16,21 @@
 Database models for pyoseo
 """
 
-from decimal import Decimal
+from __future__ import absolute_import
 from datetime import datetime
-import pytz
+from decimal import Decimal
 
-from django.conf import settings
 from django.db import models
-from django.core.exceptions import ObjectDoesNotExist
+from django.conf import settings
 from django.contrib.auth.models import User
-from lxml import etree
+from django.core.exceptions import ObjectDoesNotExist
+import pytz
 import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
-import managers
-import errors
-from utilities import _n
+from . import managers
+from . import errors
+from .utilities import _n
 
 
 class AbstractDeliveryAddress(models.Model):
@@ -126,14 +126,6 @@ class Batch(models.Model):
 
     def price(self):
         total = Decimal(0)
-        #order_fee = None
-        #for oi in self.order_items.all():
-        #    collection = oi.collection
-        #    product_price = collection.product_price
-        #    if order_fee is None:
-        #        order_fee = collection.orderconfiguration.order_processing_fee
-        #    total += product_price
-        #total += order_fee
         return total
 
     def create_order_item(self, status, additional_status_info,
@@ -148,11 +140,11 @@ class Batch(models.Model):
             item_id=order_item_spec["item_id"]
         )
         item.save()
-        for k, v in order_item_spec["option"].iteritems():
+        for k, v in order_item_spec["option"].items():
             option = Option.objects.get(name=k)
             item.selected_options.add(SelectedOption(option=option,
                                                      value=v))
-        for k, v in order_item_spec["scene_selection"].iteritems():
+        for k, v in order_item_spec["scene_selection"].items():
             item.selected_scene_selection_options.add(
                 SelectedSceneSelectionOption(option=k, value=v))
         delivery = order_item_spec["delivery_options"]

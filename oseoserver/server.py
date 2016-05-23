@@ -12,8 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-This module defines the OseoServer class, which implements general request 
+"""This module defines the OseoServer class, which implements general request
 processing operations and then delegates to specialized operation classes
 that preform each OSEO operation.
 
@@ -43,29 +42,28 @@ that preform each OSEO operation.
 #  pd.values.append(pyoseo_schema.projection('a projeccao'))
 #  pd.toxml()
 
-import logging
+from __future__ import absolute_import
 from datetime import datetime
+import logging
 
-from django.template.loader import render_to_string
 from django.db.models import Q
 from lxml import etree
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows as ows_bindings
 import pyxb
 
-from oseoserver import tasks
-import models
-import errors
-import utilities
-from auth.usernametoken import UsernameTokenAuthentication
-from signals import signals
+from . import tasks
+from . import models
+from . import errors
+from . import utilities
+from .auth.usernametoken import UsernameTokenAuthentication
+from .signals import signals
 
 logger = logging.getLogger(__name__)
 
 
 class OseoServer(object):
-    """
-    Handle requests that come from Django and process them.
+    """Handle requests that come from Django and process them.
 
     This class performs some pre-processing of requests, such as schema
     validation and user authentication. It then offloads the actual processing
@@ -74,6 +72,7 @@ class OseoServer(object):
     the result with the correct SOAP headers.
 
     Clients of this class should use only the process_request method.
+
     """
 
     DEFAULT_USER_NAME = 'oseoserver_user'
@@ -91,6 +90,7 @@ class OseoServer(object):
     }
 
     ENCODING = "utf-8"
+
     _namespaces = {
         "soap": "http://www.w3.org/2003/05/soap-envelope",
         "soap1.1": "http://schemas.xmlsoap.org/soap/envelope/",
@@ -98,6 +98,7 @@ class OseoServer(object):
                 "wssecurity-secext-1.0.xsd",
         "ows": "http://www.opengis.net/ows/2.0",
     }
+
     _exception_codes = {
         "AuthorizationFailed": "client",
         "AuthenticationFailed": "client",
@@ -128,12 +129,17 @@ class OseoServer(object):
         it into a valid pyxb OSEO object. It will then send the request to the
         appropriate operation processing class.
 
-        :arg request_data: The raw request data
-        :type request_data: str
-        :return: The response XML document, as a string, the HTTP status
-                 code and a dictionary with HTTP headers to be set by the 
-                 wsgi server
-        :rtype: tuple(str, int, dict)
+        Parameters
+        ----------
+        request_data: str
+            The raw request data
+
+        Returns
+        -------
+        response, status_code, headers: (str, int, dict)
+            The response XML document, as a string, the HTTP status code
+            and a dictionary with HTTP headers to be set by the wsgi server
+
         """
 
         element = etree.fromstring(request_data)

@@ -1,5 +1,5 @@
 from django.apps import AppConfig
-from actstream import registry
+#from actstream import registry
 
 class OseoServerConfig(AppConfig):
     name = "oseoserver"
@@ -7,7 +7,7 @@ class OseoServerConfig(AppConfig):
 
     def ready(self):
         import oseoserver.signals.handlers
-        registry.register(self.get_model("OseoUser"))
-        registry.register(self.get_model("ProductOrder"))
-        registry.register(self.get_model("SubscriptionOrder"))
-        registry.register(self.get_model("SubscriptionBatch"))
+        #registry.register(self.get_model("OseoUser"))
+        #registry.register(self.get_model("ProductOrder"))
+        #registry.register(self.get_model("SubscriptionOrder"))
+        #registry.register(self.get_model("SubscriptionBatch"))

@@ -23,10 +23,10 @@ from django.template.loader import render_to_string
 from django.core.files import File
 from actstream import action
 
-import oseoserver.models as models
-from oseoserver.models import CustomizableItem as ci
-import oseoserver.signals.signals as signals
-import oseoserver.utilities
+from .. import models
+from ..models import CustomizableItem as ci
+from . import signals
+from ..utilities import send_email
 
 
 @receiver(post_save, sender=User, weak=False,
@@ -262,7 +262,7 @@ def handle_order_failure(sender, **kwargs):
         subject = ("Copernicus Global Land Service - Order {} has "
                    "failed".format(order))
         recipients = User.objects.filter(is_staff=True).exclude(email="")
-        oseoserver.utilities.send_email(subject, msg, recipients, html=True)
+        send_email(subject, msg, recipients, html=True)
 
 
 @receiver(signals.invalid_request, weak=False,
@@ -277,7 +277,7 @@ def handle_invalid_request(sender, **kwargs):
     msg = render_to_string(template)
     subject = ("Copernicus Global Land Service - Received invalid request")
     recipients = User.objects.filter(is_staff=True).exclude(email="")
-    oseoserver.utilities.send_email(
+    send_email(
         subject, msg, recipients,
         html=True, attachments=[request_data, exception_report]
     )
