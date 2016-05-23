@@ -97,18 +97,19 @@ class OseoServer(object):
         "wsse": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-"
                 "wssecurity-secext-1.0.xsd",
         "ows": "http://www.opengis.net/ows/2.0",
+        "xml": "http://www.w3.org/XML/1998/namespace",
     }
 
     _exception_codes = {
-        "AuthorizationFailed": "client",
-        "AuthenticationFailed": "client",
-        "InvalidOrderIdentifier": "client",
-        "NoApplicableCode": "client",
-        "UnsupportedCollection": "client",
-        "InvalidParameterValue": "client",
-        "SubscriptionNotSupported": "client",
-        "ProductOrderingNotSupported": "client",
-        "FutureProductNotSupported": "client",
+        "AuthorizationFailed": "Sender",
+        "AuthenticationFailed": "Sender",
+        "InvalidOrderIdentifier": "Sender",
+        "NoApplicableCode": "Sender",
+        "UnsupportedCollection": "Sender",
+        "InvalidParameterValue": "Sender",
+        "SubscriptionNotSupported": "Sender",
+        "ProductOrderingNotSupported": "Sender",
+        "FutureProductNotSupported": "Sender",
     }
 
     OPERATION_CLASSES = {
@@ -266,7 +267,8 @@ class OseoServer(object):
                 found_group = True
                 user = models.User.objects.create_user(user_name,
                                                        password=None)
-                oseo_user = models.OseoUser.objects.get(user=user)
+                oseo_user = models.OseoUser()
+                oseo_user.user = user
                 oseo_user.oseo_group = current_group
                 oseo_user.save()
             current += 1
@@ -644,6 +646,7 @@ class OseoServer(object):
         exception_element = etree.fromstring(exception_string)
         soap_env_ns = {
             'ows': self._namespaces['ows'],
+            'xml': self._namespaces['xml'],
         }
         if soap_version == '1.2':
             soap_env_ns['soap'] = self._namespaces['soap']
@@ -665,6 +668,7 @@ class OseoServer(object):
                                             soap_env_ns['soap']))
             reason_text = etree.SubElement(fault_reason, '{{{}}}Text'.format(
                                            soap_env_ns['soap']))
+            reason_text.set("{{{}}}lang".format(soap_env_ns["xml"]), "en")
             reason_text.text = reason_msg
             fault_detail = etree.SubElement(soap_fault, '{{{}}}Detail'.format(
                                             soap_env_ns['soap']))
