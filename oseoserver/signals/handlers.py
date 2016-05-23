@@ -21,7 +21,7 @@ from django.db.models.signals import post_save, post_init, pre_save
 from django.contrib.auth.models import User
 from django.template.loader import render_to_string
 from django.core.files import File
-from actstream import action
+#from actstream import action
 
 from .. import models
 from ..models import CustomizableItem as ci
@@ -159,49 +159,50 @@ def create_order_configurations(sender, **kwargs):
     models.TaskingOrderConfiguration.objects.get_or_create(collection=c)
 
 
-@receiver(post_save, sender=models.ProductOrder, weak=False,
-          dispatch_uid='id_for_notify_product_order')
-def notify_product_order(sender, **kwargs):
-    order = kwargs["instance"]
-    user = order.user
-    if kwargs["created"]:
-        if order.order_type.notify_creation:
-            action.send(user, verb="created", target=order)
-    else:
-        if order.status == models.Order.COMPLETED:
-            action.send(order, verb="has been completed")
-        elif order.status == models.Order.FAILED:
-            action.send(order, verb="has failed")
-
-@receiver(post_save, sender=models.ProductOrder, weak=False,
-          dispatch_uid='id_for_moderate_product_order')
-def moderate_product_order(sender, **kwargs):
-    order = kwargs["instance"]
-    created = kwargs["created"]
-    if created and not order.order_type.automatic_approval:
-        for staff in User.objects.filter(is_staff=True):
-            action.send(order, verb="awaits moderation by",
-                        target=staff.oseouser)
+#@receiver(post_save, sender=models.ProductOrder, weak=False,
+#          dispatch_uid='id_for_notify_product_order')
+#def notify_product_order(sender, **kwargs):
+#    order = kwargs["instance"]
+#    user = order.user
+#    if kwargs["created"]:
+#        if order.order_type.notify_creation:
+#            action.send(user, verb="created", target=order)
+#    else:
+#        if order.status == models.Order.COMPLETED:
+#            action.send(order, verb="has been completed")
+#        elif order.status == models.Order.FAILED:
+#            action.send(order, verb="has failed")
 
 
-@receiver(post_save, sender=models.SubscriptionOrder, weak=False,
-          dispatch_uid='id_for_notify_subscription_order')
-def notify_subscription_order(sender, **kwargs):
-    order = kwargs["instance"]
-    user = order.user
-    if kwargs["created"]:
-        if order.order_type.notify_creation:
-            action.send(user, verb="created", target=order)
-    elif order.status == models.Order.CANCELLED:
-        action.send(order, verb="has been cancelled")
+#@receiver(post_save, sender=models.ProductOrder, weak=False,
+#          dispatch_uid='id_for_moderate_product_order')
+#def moderate_product_order(sender, **kwargs):
+#    order = kwargs["instance"]
+#    created = kwargs["created"]
+#    if created and not order.order_type.automatic_approval:
+#        for staff in User.objects.filter(is_staff=True):
+#            action.send(order, verb="awaits moderation by",
+#                        target=staff.oseouser)
 
 
-@receiver(post_save, sender=models.SubscriptionBatch, weak=False,
-          dispatch_uid='id_for_notify_subscription_batch')
-def notify_subscription_batch(sender, **kwargs):
-    batch = kwargs["instance"]
-    if kwargs["created"]:
-        action.send(batch, verb="created")
+#@receiver(post_save, sender=models.SubscriptionOrder, weak=False,
+#          dispatch_uid='id_for_notify_subscription_order')
+#def notify_subscription_order(sender, **kwargs):
+#    order = kwargs["instance"]
+#    user = order.user
+#    if kwargs["created"]:
+#        if order.order_type.notify_creation:
+#            action.send(user, verb="created", target=order)
+#    elif order.status == models.Order.CANCELLED:
+#        action.send(order, verb="has been cancelled")
+
+
+#@receiver(post_save, sender=models.SubscriptionBatch, weak=False,
+#          dispatch_uid='id_for_notify_subscription_batch')
+#def notify_subscription_batch(sender, **kwargs):
+#    batch = kwargs["instance"]
+#    if kwargs["created"]:
+#        action.send(batch, verb="created")
 
 
 @receiver(signals.order_status_changed, weak=False,
