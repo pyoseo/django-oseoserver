@@ -2,6 +2,7 @@ import pytest
 from pyxb import BIND
 from pyxb.bundles.opengis import oseo_1_0 as oseo
 from pyxb.bundles.wssplat import soap12
+from pyxb.bundles.wssplat import wsse
 import requests
 
 @pytest.mark.functional
@@ -12,17 +13,26 @@ class TestGetCapabilities(object):
         # will fail because presently our auth scheme requires SOAP
         pass
 
-    #def test_default_get_capabilities(self):
-    def test_get_capabilities_no_auth(self, live_server):
+    def test_default_get_capabilities(self, pyoseo_server_url,
+                                      pyoseo_server_user,
+                                      pyoseo_server_password):
         get_caps = oseo.GetCapabilities(service="OS")
-        soap_env = soap12.Envelope(Body=BIND(get_caps))
-        request_data = soap_env.toxml(encoding="utf-8")
-        url = "{0.url}/{1}/".format(live_server, "oseo")
-        #url = "http://localhost:8000/oseo/"
+        security = wsse.Security(
+            wsse.UsernameToken(
+                pyoseo_server_user,
+                wsse.Password(pyoseo_server_password, Type="BBBB#VITO")
+            ))
+        soap_request_env = soap12.Envelope(
+            Header=BIND(security),
+            Body=BIND(get_caps)
+        )
+        request_data = soap_request_env.toxml(encoding="utf-8")
+        url = "{}/oseo/".format(pyoseo_server_url)
         response = requests.post(url, data=request_data)
         response_data = response.text
         print("response_data: {}".format(response_data))
-        caps = oseo.CreateFromDocument(response_data)
+        soap_response_env = soap12.CreateFromDocument(response_data)
+        caps = soap_response_env.Body.wildcardElements()[0]
         print("caps type: {}".format(type(caps)))
 
     @pytest.mark.skip()
