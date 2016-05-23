@@ -1,0 +1,4 @@
+httpie==0.9.3
+pytest==2.9.1
+pytest-django==2.9.1
+requests==2.10.0
