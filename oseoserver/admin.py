@@ -1,9 +1,11 @@
+from __future__ import absolute_import
+
 from django.contrib import admin
 from django.core.urlresolvers import reverse
 from django.utils.html import format_html
 
-import models
-from server import OseoServer
+from . import models
+from .server import OseoServer
 
 
 class ProcessorParameterInline(admin.StackedInline):
@@ -52,46 +54,46 @@ class SelectedSceneSelectionOptionInline(admin.StackedInline):
     extra = 1
 
 
-class ProductOrderConfigurationInline(admin.StackedInline):
-    model = models.ProductOrderConfiguration
-    extra = 1
-    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-                         'scene_selection_options',)
-
-
-class MassiveOrderConfigurationInline(admin.StackedInline):
-    model = models.MassiveOrderConfiguration
-    extra = 1
-    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-                         'scene_selection_options',)
-
-
-class SubscriptionOrderConfigurationInline(admin.StackedInline):
-    model = models.SubscriptionOrderConfiguration
-    extra = 1
-    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-                         'scene_selection_options',)
-
-
-class TaskingOrderConfigurationInline(admin.StackedInline):
-    model = models.TaskingOrderConfiguration
-    extra = 1
-    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-                         'scene_selection_options',)
-
-
-@admin.register(models.OseoGroup)
-class OseoGroupAdmin(admin.ModelAdmin):
-    list_display = ("name", "authentication_class",)
-
-
-@admin.register(models.OseoUser)
-class OseoUserAdmin(admin.ModelAdmin):
-    list_display = ('user', 'oseo_group', 'disk_quota',
-                    'delete_downloaded_order_files',)
-    list_editable = ('oseo_group',)
-    fields = ('user', 'disk_quota', 'delete_downloaded_order_files')
-    readonly_fields = ('user',)
+#class ProductOrderConfigurationInline(admin.StackedInline):
+#    model = models.ProductOrderConfiguration
+#    extra = 1
+#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
+#                         'scene_selection_options',)
+#
+#
+#class MassiveOrderConfigurationInline(admin.StackedInline):
+#    model = models.MassiveOrderConfiguration
+#    extra = 1
+#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
+#                         'scene_selection_options',)
+#
+#
+#class SubscriptionOrderConfigurationInline(admin.StackedInline):
+#    model = models.SubscriptionOrderConfiguration
+#    extra = 1
+#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
+#                         'scene_selection_options',)
+#
+#
+#class TaskingOrderConfigurationInline(admin.StackedInline):
+#    model = models.TaskingOrderConfiguration
+#    extra = 1
+#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
+#                         'scene_selection_options',)
+#
+#
+#@admin.register(models.OseoGroup)
+#class OseoGroupAdmin(admin.ModelAdmin):
+#    list_display = ("name", "authentication_class",)
+#
+#
+#@admin.register(models.OseoUser)
+#class OseoUserAdmin(admin.ModelAdmin):
+#    list_display = ('user', 'oseo_group', 'disk_quota',
+#                    'delete_downloaded_order_files',)
+#    list_editable = ('oseo_group',)
+#    fields = ('user', 'disk_quota', 'delete_downloaded_order_files')
+#    readonly_fields = ('user',)
 
 
 @admin.register(models.Order)
@@ -232,19 +234,19 @@ class DeliveryOptionAdmin(admin.ModelAdmin):
 
 
 
-@admin.register(models.Collection)
-class CollectionAdmin(admin.ModelAdmin):
-    inlines = (ProductOrderConfigurationInline,
-               MassiveOrderConfigurationInline,
-               SubscriptionOrderConfigurationInline,
-               TaskingOrderConfigurationInline,)
-    list_display = ('name',
-                    'collection_id',
-                    'product_orders',
-                    'massive_orders',
-                    'subscription_orders',
-                    'tasking_orders',)
-    filter_horizontal = ('authorized_groups',)
+#@admin.register(models.Collection)
+#class CollectionAdmin(admin.ModelAdmin):
+#    inlines = (ProductOrderConfigurationInline,
+#               MassiveOrderConfigurationInline,
+#               SubscriptionOrderConfigurationInline,
+#               TaskingOrderConfigurationInline,)
+#    list_display = ('name',
+#                    'collection_id',
+#                    'product_orders',
+#                    'massive_orders',
+#                    'subscription_orders',
+#                    'tasking_orders',)
+#    #filter_horizontal = ('authorized_groups',)
 
 
 #@admin.register(models.OrderConfiguration)
@@ -267,26 +269,26 @@ class SubscriptionBatchAdmin(admin.ModelAdmin):
 class MediaDeliveryAdmin(admin.ModelAdmin):
     list_display = ("package_medium", "shipping_instructions", "delivery_fee")
 
-@admin.register(models.OrderType)
-class OrderTypeAdmin(admin.ModelAdmin):
-    list_display = ("name", "enabled", "automatic_approval",
-                    "item_processor", "item_availability_days",
-                    "notify_creation",)
-    list_editable = ("enabled", "automatic_approval", "notify_creation",)
-    readonly_fields = ("name",)
-    fieldsets = (
-        (None, {
-            'fields': ("name", "enabled", "automatic_approval",
-                       "notify_creation", "item_processor",
-                       "item_availability_days",),
-        }),
-    )
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+#@admin.register(models.OrderType)
+#class OrderTypeAdmin(admin.ModelAdmin):
+#    list_display = ("name", "enabled", "automatic_approval",
+#                    "item_processor", "item_availability_days",
+#                    "notify_creation",)
+#    list_editable = ("enabled", "automatic_approval", "notify_creation",)
+#    readonly_fields = ("name",)
+#    fieldsets = (
+#        (None, {
+#            'fields': ("name", "enabled", "automatic_approval",
+#                       "notify_creation", "item_processor",
+#                       "item_availability_days",),
+#        }),
+#    )
+#
+#    def has_add_permission(self, request):
+#        return False
+#
+#    def has_delete_permission(self, request, obj=None):
+#        return False
 
 
 

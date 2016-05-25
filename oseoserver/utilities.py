@@ -23,7 +23,7 @@ from django.template.loader import render_to_string
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
-from django.contrib.sites.models import Site
+#from django.contrib.sites.models import Site
 from mailqueue.models import MailerMessage
 from html2text import html2text
 
@@ -58,7 +58,8 @@ def get_processor(order_type, processing_step,
 
 
 def send_moderation_email(order):
-    domain = Site.objects.get_current().domain
+    #domain = Site.objects.get_current().domain
+    domain = settings.OSEOSERVER_SITE_DOMAIN
     moderation_uri = reverse(
         'admin:oseoserver_orderpendingmoderation_changelist')
     url = "http://{}{}".format(domain, moderation_uri)

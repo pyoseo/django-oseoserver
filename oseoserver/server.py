@@ -56,7 +56,7 @@ from . import tasks
 from . import models
 from . import errors
 from . import utilities
-from .auth.usernametoken import UsernameTokenAuthentication
+#from .auth.usernametoken import UsernameTokenAuthentication
 from .signals import signals
 
 logger = logging.getLogger(__name__)
@@ -79,15 +79,6 @@ class OseoServer(object):
     """Used for anonymous servers"""
 
     OSEO_VERSION = "1.0.0"
-
-    MAX_ORDER_ITEMS = 200  # this could be moved to the admin
-    """Maximum number of products that can be ordered at a time"""
-
-    STATUS_NOTIFICATIONS = {
-        models.Order.NONE: None,
-        models.Order.FINAL: None,
-        models.Order.ALL: None
-    }
 
     ENCODING = "utf-8"
 
@@ -123,7 +114,7 @@ class OseoServer(object):
         "Cancel": "oseoserver.operations.cancel.Cancel",
     }
 
-    def process_request(self, request_data):
+    def process_request(self, request_data, user):
         """Entry point for the ordering service.
 
         This method receives the raw request data as a string and then parses
@@ -134,6 +125,8 @@ class OseoServer(object):
         ----------
         request_data: str
             The raw request data
+        user: django.contrib.auth.models.User
+            The django user that is responsible for the request
 
         Returns
         -------
@@ -159,7 +152,7 @@ class OseoServer(object):
             data = element
             response_headers['Content-Type'] = 'application/xml'
         try:
-            user = self.authenticate_request(element, soap_version)
+            #user = self.authenticate_request(element, soap_version)
             schema_instance = self.parse_xml(data)
             operation, op_name = self._get_operation(schema_instance)
             response, status_code, order = operation(schema_instance, user)
@@ -195,84 +188,84 @@ class OseoServer(object):
             result = e
         return result, status_code, response_headers
 
-    def authenticate_request(self, request_element, soap_version):
-        """Authenticate an OSEO request.
+    #def authenticate_request(self, request_element, soap_version):
+    #    """Authenticate an OSEO request.
 
-        Verify that the incoming request is made by a valid user.
-        PyOSEO uses SOAP-WSS UsernameToken Profile v1.0 authentication. The
-        specification is available at:
+    #    Verify that the incoming request is made by a valid user.
+    #    PyOSEO uses SOAP-WSS UsernameToken Profile v1.0 authentication. The
+    #    specification is available at:
 
-        https://www.oasis-open.org/committees/download.php/16782/
-            wss-v1.1-spec-os-UsernameTokenProfile.pdf
+    #    https://www.oasis-open.org/committees/download.php/16782/
+    #        wss-v1.1-spec-os-UsernameTokenProfile.pdf
 
-        Request authentication can be customized according to the
-        needs of each ordering server. This method plugs into that by
-        trying to load an external authentication class.
+    #    Request authentication can be customized according to the
+    #    needs of each ordering server. This method plugs into that by
+    #    trying to load an external authentication class.
 
-        There are two auth scenarios:
+    #    There are two auth scenarios:
 
-        * A returning user
-        * A new user
+    #    * A returning user
+    #    * A new user
 
-        The actual authentication is done by a custom class. This class
-        is specified for each OseoGroup instance in its `authentication_class`
-        attribute.
+    #    The actual authentication is done by a custom class. This class
+    #    is specified for each OseoGroup instance in its `authentication_class`
+    #    attribute.
 
-        The custom authentication class must provide the following API:
+    #    The custom authentication class must provide the following API:
 
-        .. py:function:: authenticate_request(user_name, password, **kwargs)
+    #    .. py:function:: authenticate_request(user_name, password, **kwargs)
 
-        .. py:function:: is_user(user_name, password, **kwargs)
-        """
+    #    .. py:function:: is_user(user_name, password, **kwargs)
+    #    """
 
-        auth = UsernameTokenAuthentication()
-        user_name, password, extra = auth.get_details(request_element,
-                                                      soap_version)
-        logger.debug("user_name: {}".format(user_name))
-        logger.debug("password: {}".format(password))
-        logger.debug("extra: {}".format(extra))
-        try:
-            user = models.OseoUser.objects.get(user__username=user_name)
-            auth_class = user.oseo_group.authentication_class
-        except models.OseoUser.DoesNotExist:
-            user = self.add_user(user_name, password, **extra)
-            auth_class = user.oseo_group.authentication_class
-        try:
-            instance = utilities.import_class(auth_class)
-            authenticated = instance.authenticate_request(user_name, password,
-                                                          **extra)
-            if not authenticated:
-                raise errors.AuthenticationFailedError()
-        except errors.OseoError:
-            raise  # this error is handled by the calling method
-        except Exception as e:
-            # other errors are re-raised as InvalidSettings
-            logger.error('exception class: {}'.format(
-                         e.__class__.__name__))
-            logger.error('exception args: {}'.format(e.args))
-            raise errors.ServerError('Invalid authentication class')
-        logger.info('User {} authenticated successfully'.format(user_name))
-        return user
-
-    def add_user(self, user_name, password, **kwargs):
-        oseo_user = None
-        groups = models.OseoGroup.objects.all()
-        found_group = False
-        current = 0
-        while not found_group and current < len(groups):
-            current_group = groups[current]
-            custom_auth = utilities.import_class(
-                current_group.authentication_class)
-            if custom_auth.is_user(user_name, password, **kwargs):
-                found_group = True
-                user = models.User.objects.create_user(user_name,
-                                                       password=None)
-                oseo_user = models.OseoUser()
-                oseo_user.user = user
-                oseo_user.oseo_group = current_group
-                oseo_user.save()
-            current += 1
-        return oseo_user
+    #    auth = UsernameTokenAuthentication()
+    #    user_name, password, extra = auth.get_details(request_element,
+    #                                                  soap_version)
+    #    logger.debug("user_name: {}".format(user_name))
+    #    logger.debug("password: {}".format(password))
+    #    logger.debug("extra: {}".format(extra))
+    #    try:
+    #        user = models.OseoUser.objects.get(user__username=user_name)
+    #        auth_class = user.oseo_group.authentication_class
+    #    except models.OseoUser.DoesNotExist:
+    #        user = self.add_user(user_name, password, **extra)
+    #        auth_class = user.oseo_group.authentication_class
+    #    try:
+    #        instance = utilities.import_class(auth_class)
+    #        authenticated = instance.authenticate_request(user_name, password,
+    #                                                      **extra)
+    #        if not authenticated:
+    #            raise errors.AuthenticationFailedError()
+    #    except errors.OseoError:
+    #        raise  # this error is handled by the calling method
+    #    except Exception as e:
+    #        # other errors are re-raised as InvalidSettings
+    #        logger.error('exception class: {}'.format(
+    #                     e.__class__.__name__))
+    #        logger.error('exception args: {}'.format(e.args))
+    #        raise errors.ServerError('Invalid authentication class')
+    #    logger.info('User {} authenticated successfully'.format(user_name))
+    #    return user
+    #
+    #def add_user(self, user_name, password, **kwargs):
+    #    oseo_user = None
+    #    groups = models.OseoGroup.objects.all()
+    #    found_group = False
+    #    current = 0
+    #    while not found_group and current < len(groups):
+    #        current_group = groups[current]
+    #        custom_auth = utilities.import_class(
+    #            current_group.authentication_class)
+    #        if custom_auth.is_user(user_name, password, **kwargs):
+    #            found_group = True
+    #            user = models.User.objects.create_user(user_name,
+    #                                                   password=None)
+    #            oseo_user = models.OseoUser()
+    #            oseo_user.user = user
+    #            oseo_user.oseo_group = current_group
+    #            oseo_user.save()
+    #        current += 1
+    #    return oseo_user
 
     def create_exception_report(self, code, text, soap_version, locator=None):
         """

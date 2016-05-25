@@ -21,17 +21,23 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.db import models
-from django.conf import settings
+
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
+from django.conf import settings as django_settings
 import pytz
 import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from . import managers
 from . import errors
+from . import settings
+from . import constants
 from .utilities import _n
 
+
+COLLECTION_CHOICES = [(c["name"], c["name"]) for
+                      c in settings.OSEOSERVER_COLLECTIONS]
 
 class AbstractDeliveryAddress(models.Model):
     first_name = models.CharField(max_length=50, blank=True)
@@ -100,19 +106,19 @@ class Batch(models.Model):
 
     def status(self):
         order = {
-            CustomizableItem.SUBMITTED: 0,
-            CustomizableItem.ACCEPTED: 1,
-            CustomizableItem.IN_PRODUCTION: 2,
-            CustomizableItem.SUSPENDED: 3,
-            CustomizableItem.CANCELLED: 4,
-            CustomizableItem.COMPLETED: 5,
-            CustomizableItem.FAILED: 6,
-            CustomizableItem.TERMINATED: 7,
-            CustomizableItem.DOWNLOADED: 8,
+            constants.OrderStatus.SUBMITTED.value: 0,
+            constants.OrderStatus.ACCEPTED.value: 1,
+            constants.OrderStatus.IN_PRODUCTION.value: 2,
+            constants.OrderStatus.SUSPENDED.value: 3,
+            constants.OrderStatus.CANCELLED.value: 4,
+            constants.OrderStatus.COMPLETEd.value: 5,
+            constants.OrderStatus.FAILED.value: 6,
+            constants.OrderStatus.TERMINATED.value: 7,
+            constants.OrderStatus.DOWNLOADED.value: 8,
         }
         item_statuses = set([oi.status for oi in self.order_items.all()])
-        if CustomizableItem.FAILED in item_statuses:
-            status = CustomizableItem.FAILED
+        if CustomizableItem.FAILED.value in item_statuses:
+            status = CustomizableItem.FAILED.value
         elif len(item_statuses) == 1:
             status = item_statuses.pop()
         elif any(item_statuses):
@@ -214,92 +220,74 @@ class Batch(models.Model):
         return str("{}({})".format(self.__class__.__name__, self.id))
 
 
-class Collection(models.Model):
-    name = models.CharField(max_length=50, unique=True)
-    authorized_groups = models.ManyToManyField("OseoGroup", null=True,
-                                               blank=True)
-    catalogue_endpoint = models.CharField(
-        max_length=255,
-        help_text="URL of the CSW server where this collection is available"
-    )
-    collection_id = models.CharField(
-        max_length=255,
-        unique=True,
-        help_text="Identifier of the dataset series for this collection in "
-                  "the catalogue"
-    )
-    product_price = models.DecimalField(
-        max_digits=5, decimal_places=2,
-        help_text="The price of an individual product",
-        default=Decimal(0)
-    )
-    generation_frequency = models.CharField(
-        max_length=255,
-        help_text="Frequency at which new products get generated",
-        blank=True,
-        default="once per hour"
-    )
-
-    def _product_orders_enabled(self):
-        return "enabled" if self.productorderconfiguration.enabled \
-            else "disabled"
-    product_orders = property(_product_orders_enabled)
-
-    def _massive_orders_enabled(self):
-        return "enabled" if self.massiveorderconfiguration.enabled \
-            else "disabled"
-    massive_orders = property(_massive_orders_enabled)
-
-    def _subscription_orders_enabled(self):
-        return "enabled" if self.subscriptionorderconfiguration.enabled \
-            else "disabled"
-    subscription_orders = property(_subscription_orders_enabled)
-
-    def _tasking_orders_enabled(self):
-        return "enabled" if self.taskingorderconfiguration.enabled \
-            else "disabled"
-    tasking_orders = property(_tasking_orders_enabled)
-
-    def allows_group(self, oseo_group):
-        """
-        Specify whether the input oseo_group can order from this collection
-        """
-
-        result = True
-        try:
-            self.authorized_groups.get(name=oseo_group.name)
-        except self.DoesNotExist:
-            result = False
-        return result
-
-    def __unicode__(self):
-        return self.name
+#class Collection(models.Model):
+#    name = models.CharField(max_length=50, unique=True)
+#    #authorized_groups = models.ManyToManyField("OseoGroup", null=True,
+#    #                                           blank=True)
+#    catalogue_endpoint = models.CharField(
+#        max_length=255,
+#        help_text="URL of the CSW server where this collection is available"
+#    )
+#    collection_id = models.CharField(
+#        max_length=255,
+#        unique=True,
+#        help_text="Identifier of the dataset series for this collection in "
+#                  "the catalogue"
+#    )
+#    product_price = models.DecimalField(
+#        max_digits=5, decimal_places=2,
+#        help_text="The price of an individual product",
+#        default=Decimal(0)
+#    )
+#    generation_frequency = models.CharField(
+#        max_length=255,
+#        help_text="Frequency at which new products get generated",
+#        blank=True,
+#        default="once per hour"
+#    )
+#
+#    def _product_orders_enabled(self):
+#        return "enabled" if self.productorderconfiguration.enabled \
+#            else "disabled"
+#    product_orders = property(_product_orders_enabled)
+#
+#    def _massive_orders_enabled(self):
+#        return "enabled" if self.massiveorderconfiguration.enabled \
+#            else "disabled"
+#    massive_orders = property(_massive_orders_enabled)
+#
+#    def _subscription_orders_enabled(self):
+#        return "enabled" if self.subscriptionorderconfiguration.enabled \
+#            else "disabled"
+#    subscription_orders = property(_subscription_orders_enabled)
+#
+#    def _tasking_orders_enabled(self):
+#        return "enabled" if self.taskingorderconfiguration.enabled \
+#            else "disabled"
+#    tasking_orders = property(_tasking_orders_enabled)
+#
+#    def allows_group(self, oseo_group):
+#        """
+#        Specify whether the input oseo_group can order from this collection
+#        """
+#
+#        result = True
+#        try:
+#            self.authorized_groups.get(name=oseo_group.name)
+#        except self.DoesNotExist:
+#            result = False
+#        return result
+#
+#    def __unicode__(self):
+#        return self.name
 
 
 class CustomizableItem(models.Model):
-    SUBMITTED = "Submitted"
-    ACCEPTED = "Accepted"
-    IN_PRODUCTION = "InProduction"
-    SUSPENDED = "Suspended"
-    CANCELLED = "Cancelled"
-    COMPLETED = "Completed"
-    FAILED = "Failed"
-    TERMINATED = "Terminated"
-    DOWNLOADED = "Downloaded"
-    STATUS_CHOICES = (
-        (SUBMITTED, SUBMITTED),
-        (ACCEPTED, ACCEPTED),
-        (IN_PRODUCTION, IN_PRODUCTION),
-        (SUSPENDED, SUSPENDED),
-        (CANCELLED, CANCELLED),
-        (COMPLETED, COMPLETED),
-        (FAILED, FAILED),
-        (TERMINATED, TERMINATED),
-        (DOWNLOADED, DOWNLOADED),
-    )
-
+    STATUS_CHOICES = [(status.value, status.value) for status in
+                      constants.OrderStatus]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES,
-                              default=SUBMITTED, help_text="initial status")
+                              default=constants.OrderStatus.SUBMITTED.value,
+                              help_text="initial status")
     additional_status_info = models.TextField(help_text="Additional "
                                               "information about the status",
                                               blank=True)
@@ -602,66 +590,58 @@ class OnlineAddress(models.Model):
         verbose_name_plural = 'online addresses'
 
 
-class OrderConfiguration(models.Model):
-
-    enabled = models.BooleanField(default=False)
-    order_processing_fee = models.DecimalField(default=Decimal(0),
-                                               max_digits=5,
-                                               decimal_places=2)
-    options = models.ManyToManyField("Option", null=True, blank=True)
-    delivery_options = models.ManyToManyField("DeliveryOption", null=True,
-                                              blank=True)
-    payment_options = models.ManyToManyField("PaymentOption", null=True,
-                                             blank=True)
-    scene_selection_options = models.ManyToManyField("SceneSelectionOption",
-                                                     null=True, blank=True)
-
-    def __unicode__(self):
-        return "{}".format("Enabled" if self.enabled else "Disabled")
-
-
-class ProductOrderConfiguration(OrderConfiguration):
-    collection = models.OneToOneField("Collection", null=False)
-
-
-class MassiveOrderConfiguration(OrderConfiguration):
-    collection = models.OneToOneField("Collection", null=False)
-
-
-class SubscriptionOrderConfiguration(OrderConfiguration):
-    collection = models.OneToOneField("Collection", null=False)
-
-
-class TaskingOrderConfiguration(OrderConfiguration):
-    collection = models.OneToOneField("Collection", null=False)
+#class OrderConfiguration(models.Model):
+#
+#    enabled = models.BooleanField(default=False)
+#    order_processing_fee = models.DecimalField(default=Decimal(0),
+#                                               max_digits=5,
+#                                               decimal_places=2)
+#    options = models.ManyToManyField("Option", blank=True)
+#    delivery_options = models.ManyToManyField("DeliveryOption", blank=True)
+#    payment_options = models.ManyToManyField("PaymentOption", blank=True)
+#    scene_selection_options = models.ManyToManyField("SceneSelectionOption",
+#                                                     blank=True)
+#
+#    def __unicode__(self):
+#        return "{}".format("Enabled" if self.enabled else "Disabled")
+#
+#
+#class ProductOrderConfiguration(OrderConfiguration):
+#    collection = models.OneToOneField("Collection", null=False)
+#
+#
+#class MassiveOrderConfiguration(OrderConfiguration):
+#    collection = models.OneToOneField("Collection", null=False)
+#
+#
+#class SubscriptionOrderConfiguration(OrderConfiguration):
+#    collection = models.OneToOneField("Collection", null=False)
+#
+#
+#class TaskingOrderConfiguration(OrderConfiguration):
+#    collection = models.OneToOneField("Collection", null=False)
 
 
 class Order(CustomizableItem):
-    MASSIVE_ORDER_REFERENCE = 'Massive order'
-    MAX_ORDER_ITEMS = getattr(settings, "MAX_ORDER_ITEMS", 200)
-    PRODUCT_ORDER = 'PRODUCT_ORDER'
-    SUBSCRIPTION_ORDER = 'SUBSCRIPTION_ORDER'
-    MASSIVE_ORDER = 'MASSIVE_ORDER'
-    TASKING_ORDER = 'TASKING_ORDER'
+    MAX_ORDER_ITEMS = settings.OSEOSERVER_MAX_ORDER_ITEMS
+
     ZIP = "zip"
     PACKAGING_CHOICES = (
         (ZIP, ZIP),
     )
-    STANDARD = "STANDARD"
-    FAST_TRACK = "FAST_TRACK"
-    PRIORITY_CHOICES = ((STANDARD, STANDARD), (FAST_TRACK, FAST_TRACK))
-    NONE = 'None'
-    FINAL = 'Final'
-    ALL = 'All'
-    STATUS_NOTIFICATION_CHOICES = (
-        (NONE, NONE),
-        (FINAL, FINAL),
-        (ALL, ALL),
+    ORDER_TYPE_CHOICES = [(t.value, t.value) for t in constants.OrderType]
+
+    #user = models.ForeignKey("OseoUser", related_name="orders")
+    user = models.ForeignKey(django_settings.AUTH_USER_MODEL,
+                             related_name="orders")
+    #order_type = models.ForeignKey("OrderType", related_name="orders")
+    order_type = models.CharField(
+        max_length=30,
+        default=constants.OrderType.PRODUCT_ORDER.value,
+        choices=ORDER_TYPE_CHOICES
     )
-    BRIEF_PRESENTATION = "brief"
-    FULL_PRESENTATION = "full"
-    user = models.ForeignKey("OseoUser", related_name="orders")
-    order_type = models.ForeignKey("OrderType", related_name="orders")
+
+
     last_describe_result_access_request = models.DateTimeField(null=True,
                                                                blank=True)
     reference = models.CharField(max_length=30,
@@ -671,11 +651,16 @@ class Order(CustomizableItem):
     packaging = models.CharField(max_length=30,
                                  choices=PACKAGING_CHOICES,
                                  blank=True)
-    priority = models.CharField(max_length=30,
-                                choices=PRIORITY_CHOICES,
-                                blank=True)
-    status_notification = models.CharField(max_length=10, default=NONE,
-                                           choices=STATUS_NOTIFICATION_CHOICES)
+    priority = models.CharField(
+        max_length=30,
+        choices=[(p.value, p.value) for p in constants.Priority],
+        blank=True
+    )
+    status_notification = models.CharField(
+        max_length=10,
+        default=constants.StatusNotification.NONE.value,
+        choices=[(n.value, n.value) for n in constants.StatusNotification]
+    )
 
     def show_batches(self):
         return ', '.join([str(b.id) for b in self.batches.all()])
@@ -692,13 +677,14 @@ class Order(CustomizableItem):
         self.batches.add(batch)
         return batch
 
-    def create_oseo_order_monitor(self, presentation=BRIEF_PRESENTATION):
+    def create_oseo_order_monitor(
+            self, presentation=constants.Presentation.BRIEF.value):
         om = oseo.CommonOrderMonitorSpecification()
-        if self.order_type.name == self.MASSIVE_ORDER:
-            om.orderType = self.PRODUCT_ORDER
-            om.orderReference = self.MASSIVE_ORDER_REFERENCE
+        if self.order_type == constants.OrderType.MASSIVE_ORDER.value:
+            om.orderType = constants.OrderType.PRODUCT_ORDER.value
+            om.orderReference = constants.MASSIVE_ORDER_REFERENCE
         else:
-            om.orderType = self.order_type.name
+            om.orderType = self.order_type
             om.orderReference = _n(self.reference)
         om.orderId = str(self.id)
         om.orderStatusInfo = oseo.StatusType(
@@ -722,12 +708,12 @@ class Order(CustomizableItem):
         # add any 'option' elements
         om.deliveryOptions = self.create_oseo_delivery_options()
         om.priority = _n(self.priority)
-        if presentation == self.FULL_PRESENTATION:
-            if self.order_type.name == self.PRODUCT_ORDER:
+        if presentation == constants.Presentation.FULL.value:
+            if self.order_type == constants.OrderType.PRODUCT_ORDER.value:
                 batch = self.batches.get()
                 sits = batch.create_oseo_items_status()
                 om.orderItem.extend(sits)
-            elif self.order_type.name == self.SUBSCRIPTION_ORDER:
+            elif self.order_type == constants.OrderType.SUBSCRIPTION_ORDER.value:
                 for batch in self.batches.all()[1:]:
                     sits = batch.create_oseo_items_status()
                     om.orderItem.extend(sits)
@@ -812,25 +798,29 @@ class TaskingOrder(DerivedOrder):
         return "{}({})".format(self.__class__.__name__, self.id)
 
 
-class OrderType(models.Model):
-    name = models.CharField(max_length=30)
-    enabled = models.BooleanField(default=False)
-    automatic_approval = models.BooleanField(default=False)
-    notify_creation = models.BooleanField(default=True)
-    item_processor = models.ForeignKey("ItemProcessor")
-    item_availability_days = models.PositiveSmallIntegerField(
-        default=10,
-        help_text="How many days will an item be available for "
-                  "download after it has been generated?"
-    )
-
-    def __unicode__(self):
-        return self.name
+#class OrderType(models.Model):
+#    name = models.CharField(max_length=30)
+#    enabled = models.BooleanField(default=False)
+#    automatic_approval = models.BooleanField(default=False)
+#    notify_creation = models.BooleanField(default=True)
+#    item_processor = models.ForeignKey("ItemProcessor")
+#    item_availability_days = models.PositiveSmallIntegerField(
+#        default=10,
+#        help_text="How many days will an item be available for "
+#                  "download after it has been generated?"
+#    )
+#
+#    def __unicode__(self):
+#        return self.name
 
 
 class OrderItem(CustomizableItem):
     batch = models.ForeignKey("Batch", related_name="order_items")
-    collection = models.ForeignKey("Collection")
+    #collection = models.ForeignKey("Collection")
+    collection = models.CharField(
+        max_length=255,
+        choices=COLLECTION_CHOICES
+    )
     identifier = models.CharField(max_length=255, blank=True,
                                   help_text="identifier for this order item. "
                                             "It is the product Id in the "
@@ -880,7 +870,7 @@ class OrderItem(CustomizableItem):
         # normal product orders and for subscription batches
         sit.productId = self.identifier
         sit.productOrderOptionsId = "Options for {} {}".format(
-            self.collection.name, self.batch.order.order_type.name)
+            self.collection.name, self.batch.order.order_type)
         sit.orderItemRemark = _n(self.remark)
         sit.collectionId = _n(self.collection_id)
         # add any 'option' elements that may be present
@@ -928,38 +918,38 @@ class OseoFile(models.Model):
         return self.url
 
 
-class OseoGroup(models.Model):
-    name = models.CharField(max_length=50)
-    description = models.TextField(blank=True)
-    authentication_class = models.CharField(
-        max_length=255,
-        help_text="Python path to a custom authentication class to use when"
-                  "validating orders for users belonging to this group",
-        blank=True
-    )
-    # these fields are probably not needed
+#class OseoGroup(models.Model):
+#    name = models.CharField(max_length=50)
+#    description = models.TextField(blank=True)
+#    authentication_class = models.CharField(
+#        max_length=255,
+#        help_text="Python path to a custom authentication class to use when"
+#                  "validating orders for users belonging to this group",
+#        blank=True
+#    )
+#    # these fields are probably not needed
+#
+#    def __unicode__(self):
+#        return self.name
 
-    def __unicode__(self):
-        return self.name
 
-
-class OseoUser(models.Model):
-    user = models.OneToOneField(User)
-    oseo_group = models.ForeignKey("OseoGroup", blank=True, null=True)
-    disk_quota = models.SmallIntegerField(default=50, help_text='Disk space '
-                                          'available to each user. Expressed '
-                                          'in Gigabytes')
-    delete_downloaded_order_files = models.BooleanField(
-        default=True,
-        help_text='If this option is selected, ordered items will be deleted '
-                  'from the server as soon as their download has been '
-                  'aknowledged. If not, the ordered items are only deleted '
-                  'after the expiration of the "order availability time" '
-                  'period.'
-    )
-
-    def __unicode__(self):
-        return self.user.username
+#class OseoUser(models.Model):
+#    user = models.OneToOneField(User)
+#    oseo_group = models.ForeignKey("OseoGroup", blank=True, null=True)
+#    disk_quota = models.SmallIntegerField(default=50, help_text='Disk space '
+#                                          'available to each user. Expressed '
+#                                          'in Gigabytes')
+#    delete_downloaded_order_files = models.BooleanField(
+#        default=True,
+#        help_text='If this option is selected, ordered items will be deleted '
+#                  'from the server as soon as their download has been '
+#                  'aknowledged. If not, the ordered items are only deleted '
+#                  'after the expiration of the "order availability time" '
+#                  'period.'
+#    )
+#
+#    def __unicode__(self):
+#        return self.user.username
 
 
 class PaymentOption(AbstractOption):
@@ -1044,7 +1034,11 @@ class SelectedDeliveryOption(models.Model):
 
 class SubscriptionBatch(Batch):
     timeslot = models.DateTimeField()
-    collection = models.ForeignKey(Collection)
+    #collection = models.ForeignKey(Collection)
+    collection = models.CharField(
+        max_length=255,
+        choices=COLLECTION_CHOICES
+    )
 
     class Meta:
         verbose_name_plural = "subscription batches"

@@ -16,18 +16,18 @@
 Implements the OSEO GetCapabilities operation
 """
 
+from __future__ import absolute_import
 import logging
 
 from django.core.urlresolvers import reverse
-from django.contrib.sites.models import Site
+#from django.contrib.sites.models import Site
 from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows_2_0 as ows
-#import pyxb.bundles.opengis.swes_2_0 as swes
 
-from oseoserver.operations.base import OseoOperation
-import oseoserver.server as server
-from oseoserver.models import OrderType, Order
+from .. import server
+from .. import settings
+from .base import OseoOperation
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,8 @@ class GetCapabilities(OseoOperation):
 
     def _build_operations_metadata(self):
         op_meta = ows.OperationsMetadata()
-        domain = Site.objects.get_current().domain
+        #domain = Site.objects.get_current().domain
+        domain = settings.OSEOSERVER_SITE_DOMAIN
         for op_name in server.OseoServer.OPERATION_CLASSES.keys():
             op = ows.Operation(name=op_name)
             op.DCP.append(BIND())
@@ -78,15 +79,15 @@ class GetCapabilities(OseoOperation):
         return op_meta
 
     def _build_contents(self, user):
-        product_order_type = OrderType.objects.get(name=Order.PRODUCT_ORDER)
-        subscription_order_type = OrderType.objects.get(
-            name=Order.SUBSCRIPTION_ORDER)
-        tasking_order_type = OrderType.objects.get(name=Order.TASKING_ORDER)
+        product_order_type = settings.OSEOSERVER_PRODUCT_ORDER
+        subscription_order_type = settings.OSEOSERVER_SUBSCRIPTION_ORDER
+        tasking_order_type = settings.OSEOSERVER_TASKING_ORDER
         logger.debug("before creating OrderingServiceContentsType...")
         contents = oseo.OrderingServiceContentsType(
-            ProductOrders=BIND(supported=product_order_type.enabled),
-            SubscriptionOrders=BIND(supported=subscription_order_type.enabled),
-            ProgrammingOrders=BIND(supported=tasking_order_type.enabled),
+            ProductOrders=BIND(supported=product_order_type["enabled"]),
+            SubscriptionOrders=BIND(
+                supported=subscription_order_type["enabled"]),
+            ProgrammingOrders=BIND(supported=tasking_order_type["enabled"]),
             GetQuotationCapabilities=BIND(supported=False,
                                           synchronous=False,
                                           asynchronous=False,
@@ -94,7 +95,7 @@ class GetCapabilities(OseoOperation):
                                           off_line=False),
             SubmitCapabilities=BIND(
                 asynchronous=False,
-                maxNumberOfProducts=server.OseoServer.MAX_ORDER_ITEMS,
+                maxNumberOfProducts=settings.OSEOSERVER_MAX_ORDER_ITEMS,
                 globalDeliveryOptions=True,
                 localDeliveryOptions=True,
                 globalOrderOptions=True,
@@ -108,15 +109,15 @@ class GetCapabilities(OseoOperation):
                                     asynchronous=False),
         )
         logger.debug("before adding CollectionCapability...")
-        for collection in user.oseo_group.collection_set.all():
+        for collection in settings.OSEOSERVER_COLLECTIONS:
             c = oseo.CollectionCapability(
-            collectionId=collection.collection_id,
-            ProductOrders=BIND(
-                supported=collection.productorderconfiguration.enabled),
-            SubscriptionOrders=BIND(
-                supported=collection.subscriptionorderconfiguration.enabled),
-            DescribeResultAccessCapabilities=BIND(supported=True),
-            CancelCapabilities=BIND(supported=True, asynchronous=False),
+                collectionId=collection["collection_identifier"],
+                ProductOrders=BIND(
+                    supported=collection["product_orders"]["enabled"]),
+                SubscriptionOrders=BIND(
+                    supported=collection["subscription_orders"]["enabled"]),
+                DescribeResultAccessCapabilities=BIND(supported=True),
+                CancelCapabilities=BIND(supported=True, asynchronous=False),
             )
             contents.SupportedCollection.append(c)
         contents.ContentsType.append(

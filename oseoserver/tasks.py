@@ -38,7 +38,7 @@ from celery import shared_task
 from celery import group, chord, chain
 from celery.utils.log import get_task_logger
 from django.conf import settings as django_settings
-from django.contrib.sites.models import Site
+#from django.contrib.sites.models import Site
 from django.contrib.auth.models import User
 import pytz
 
@@ -154,7 +154,8 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
             urls, details = processor.process_item_online_access(
                 order_item.identifier, order_item.item_id, order.id,
                 order.user.user.username, options, delivery_options,
-                domain=Site.objects.get_current().domain,
+                #domain=Site.objects.get_current().domain,
+                domain=django_settings.OSEOSERVER_SITE_DOMAIN,
                 sub_uri=django_settings.SITE_SUB_URI,
                 **params)
             order_item.additional_status_info = details
@@ -382,7 +383,8 @@ def _package_batch(batch, compression):
         models.ItemProcessor.PROCESSING_PROCESS_ITEM,
         logger_type="pyoseo"
     )
-    domain = Site.objects.get_current().domain
+    #domain = Site.objects.get_current().domain
+    domain = django_settings.OSEOSERVER_SITE_DOMAIN
     files_to_package = []
     try:
         for item in batch.order_items.all():
