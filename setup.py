@@ -20,6 +20,7 @@ setup(
         "django-activity-stream",
         "django-mail-queue",
         "django-sendfile",
+        "enum34",
         "html2text",
         #"librabbitmq",
         "lxml",
