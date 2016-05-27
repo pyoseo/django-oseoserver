@@ -47,7 +47,6 @@ class GetCapabilities(OseoOperation):
         :return:
         """
 
-        status_code = 200
         # parse the GetCapabilities request
         # here we just provide a standard response
         caps = oseo.Capabilities(version=server.OseoServer.OSEO_VERSION)
@@ -56,7 +55,7 @@ class GetCapabilities(OseoOperation):
         caps.OperationsMetadata = self._build_operations_metadata()
         caps.Contents = self._build_contents(user)
         caps.Notifications = self._build_notifications()
-        return caps, status_code, None
+        return caps, None
 
     def _build_service_identification(self):
         return None  # not implemented yet

@@ -41,11 +41,10 @@ class GetStatus(OseoOperation):
         :type request: pyxb.bundles.opengis.raw.oseo.GetStatusRequestType
         :arg user: User making the request
         :type user: oseoserver.models.OseoUser
-        :return: The XML response object and the HTTP status code
-        :rtype: tuple(str, int)
+        :return: The XML response object
+        :rtype: str
         """
 
-        status_code = 200
         records = []
         if request.orderId is not None:  # 'order retrieve' type of request
             try:
@@ -65,7 +64,7 @@ class GetStatus(OseoOperation):
             records = self._find_orders(request, user)
         response = self._generate_get_status_response(records,
                                                       request.presentation)
-        return response, status_code, None
+        return response, None
 
     def _generate_get_status_response(self, records, presentation):
         """

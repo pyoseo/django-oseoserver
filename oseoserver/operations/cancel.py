@@ -52,6 +52,5 @@ class Cancel(OseoOperation):
         else:
             raise errors.ServerError("Cancellation of tasking orders is "
                                      "not implemented")
-        status_code = 200
         response = oseo.CancelAck(status="success")
-        return response, status_code, None
+        return response, None

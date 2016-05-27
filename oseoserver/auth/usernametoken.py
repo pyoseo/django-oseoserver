@@ -22,7 +22,7 @@ from .. import errors
 from ..constants import NAMESPACES
 
 
-def get_details(self, request_element, soap_version):
+def get_details(request_element, soap_version):
     """
 
     :arg request_element:

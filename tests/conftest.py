@@ -8,3 +8,7 @@ def pytest_configure(config):
         "markers",
         "unit: run only unit tests"
     )
+    config.addinivalue_line(
+        "markers",
+        "integration: run only integration tests"
+    )

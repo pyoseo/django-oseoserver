@@ -34,7 +34,7 @@ class ServerError(OseoServerError):
         return "ServerError: {} {}".format(self.args, self.kwargs)
 
 
-class NonSoapRequestError(OseoServerError):
+class InvalidSoapVersionError(OseoServerError):
     pass
 
 

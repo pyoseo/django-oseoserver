@@ -43,11 +43,10 @@ class GetOptions(OseoOperation):
         :type request: pyxb.bundles.opengis.raw.oseo.OrderOptionsRequestType
         :arg user: User making the request
         :type user: oseoserver.models.OseoUser
-        :return: The XML response object and the HTTP status code
-        :rtype: tuple(str, int)
+        :return: The XML response object
+        :rtype: str
         """
 
-        status_code = 200
         response = oseo.GetOptionsResponse(status="success")
         if any(request.identifier):  # product identifier query
             # retrieve the products from the catalogue using the identifier
@@ -69,7 +68,7 @@ class GetOptions(OseoOperation):
                 raise errors.UnsupportedCollectionError()
         elif request.taskingRequestId is not None:
             raise NotImplementedError
-        return response, status_code, None
+        return response, None
 
     def create_oseo_order_options(self, collection, user, order_type_name):
         group = user.oseo_group

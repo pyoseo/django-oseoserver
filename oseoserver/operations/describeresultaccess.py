@@ -46,13 +46,11 @@ class DescribeResultAccess(OseoOperation):
         :type user: oseoserver.models.OseoUser
         :arg user_password: Password of the user making the request
         :type user_password: str
-        :return: The DescribeResultAccess response object and the HTTP status
+        :return: The DescribeResultAccess response object
                  code
-        :rtype: tuple(pyxb.bundles.opengis.oseo.DescribeResultAccessResponse,
-                int)
+        :rtype: pyxb.bundles.opengis.oseo.DescribeResultAccessResponse
         """
 
-        status_code = 200
         try:
             order = models.Order.objects.get(id=request.orderId)
         except ObjectDoesNotExist:
@@ -82,7 +80,7 @@ class DescribeResultAccess(OseoOperation):
             iut.itemAddress.ResourceAddress.URL = oseo_file.url
             iut.expirationDate = oseo_file.expires_on
             response.URLs.append(iut)
-        return response, status_code, None
+        return response, None
 
     def get_order_completed_files(self, order, behaviour):
         """

@@ -21,6 +21,7 @@ from django.db.models.signals import post_save, post_init, pre_save
 from django.contrib.auth.models import User
 from django.template.loader import render_to_string
 from django.core.files import File
+from lxml import etree
 #from actstream import action
 
 from .. import models
@@ -273,6 +274,8 @@ def handle_invalid_request(sender, **kwargs):
     template = "invalid_request.html"
     request_data = File(StringIO(kwargs["request_data"]),
                         name="request_data.xml")
+    exception_report_string = etree.tostring(kwargs["exception_report"],
+                                             pretty_print=True)
     exception_report = File(StringIO(kwargs["exception_report"]),
                             name="exception_report.xml")
     msg = render_to_string(template)

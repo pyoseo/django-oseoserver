@@ -1,11 +1,7 @@
-"""Unit tests for oseoserver.server"""
+"""Unit tests for the oseoserver.server module."""
 
-from lxml import etree
 import pytest
-from pyxb import BIND
-from pyxb.bundles.opengis import oseo_1_0 as oseo
-from pyxb.bundles.wssplat import soap12
-from pyxb.bundles.wssplat import wsse
+import mock
 
 from oseoserver.server import OseoServer
 
@@ -18,35 +14,38 @@ class TestServer(object):
         assert server.ENCODING.lower() == "utf-8"
         assert server.OSEO_VERSION == "1.0.0"
 
-    def test_process_get_capabilities(self):
-        """GetCapabilities requests are processed OK."""
-        server = OseoServer()
-        fake_username = "fake_user"
-        fake_password = "fake_pass"
-        fake_password_type = "fake"
+    def test_process_request_no_submit(self):
+        fake_request_data = "fake_request"
         fake_user = None
+        fake_response = mock.MagicMock()
+        fake_xml = "fake_xml"
+        fake_response.toxml.return_value = fake_xml
+        fake_response_element = "fake_response_element"
+        fake_order = "fake_order"
+        fake_request_instance = "fake_request_instance"
+        fake_operation = mock.MagicMock()
+        fake_operation_name = "fake_operation_name"
+        fake_operation.return_value = (fake_response, fake_order)
 
-        get_caps = oseo.GetCapabilities(service="OS")
-        security = wsse.Security(
-            wsse.UsernameToken(
-                fake_username,
-                wsse.Password(fake_password, Type=fake_password_type)
-            )
-        )
-        soap_request_env = soap12.Envelope(
-            Header=BIND(security),
-            Body=BIND(get_caps)
-        )
-        request_data = soap_request_env.toxml(encoding="utf-8")
+        server = OseoServer()
+        with mock.patch.multiple(server, parse_xml=mock.DEFAULT,
+                                 _get_operation=mock.DEFAULT) as mocks, \
+                mock.patch("oseoserver.server.etree",
+                           autospec=True) as mocked_etree:
+            mocks["parse_xml"].return_value = fake_request_instance
+            mocks["_get_operation"].return_value = (fake_operation,
+                                                    fake_operation_name)
+            mocked_etree.fromstring.return_value = fake_response_element
+            response_element = server.process_request(
+                request_data=fake_request_data, user=fake_user)
+            assert response_element == fake_response_element
+            mocks["parse_xml"].assert_called_once_with(fake_request_data)
+            mocks["_get_operation"].assert_called_once_with(
+                fake_request_instance)
+            fake_operation.assert_called_once_with(fake_request_instance,
+                                                   fake_user)
+            fake_response.toxml.assert_called_once_with(
+                encoding=server.ENCODING)
+            mocked_etree.fromstring.assert_called_once_with(fake_xml)
 
-        response, status, headers = server.process_request(request_data,
-                                                           fake_user)
-        response_element = etree.fromstring(response)
-        assert status == 200
-        assert headers["Content-Type"] == "application/soap+xml"
-        assert response_element.tag == "{{{}}}Envelope".format(
-            server._namespaces["soap"])
-        caps = response_element.xpath("soap:Body/oseo:Capabilities",
-                                      namespaces=server._namespaces)
-        assert len(caps) == 1
 

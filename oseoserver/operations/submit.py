@@ -49,11 +49,10 @@ class Submit(OseoOperation):
         :type request: pyxb.bundles.opengis.raw.oseo.GetStatusRequestType
         :arg user: User making the request
         :type user: oseoserver.models.OseoUser
-        :return: The XML response object and the HTTP status code
-        :rtype: tuple(str, int)
+        :return: The XML response object
+        :rtype: str
         """
 
-        status_code = 200
         status_notification = self.validate_status_notification(request)
         if request.orderSpecification is not None:
             requested_spec = request.orderSpecification
@@ -81,7 +80,7 @@ class Submit(OseoOperation):
         response = oseo.SubmitAck(status='success')
         response.orderId = str(order.id)
         response.orderReference = _n(order.reference)
-        return response, status_code, order
+        return response, order
 
     def process_order_specification(self, order_specification, user):
         """

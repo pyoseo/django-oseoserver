@@ -3,10 +3,14 @@ import os
 import os.path
 from datetime import datetime
 
-from django.http import (HttpResponse, HttpResponseForbidden,
-                         HttpResponseNotFound)
+from django.http import HttpResponse
+from django.http import HttpResponseForbidden
+from django.http import HttpResponseNotFound
+from django.http import HttpResponseBadRequest
+
 from django.shortcuts import get_object_or_404, get_list_or_404
 from django.views.decorators.csrf import csrf_exempt
+from lxml import etree
 from sendfile import sendfile
 
 import oseoserver.soap
@@ -17,6 +21,7 @@ from . import utilities
 from . import soap
 from .auth import usernametoken
 from .server import OseoServer
+from .signals import signals
 
 
 @csrf_exempt
@@ -30,32 +35,57 @@ def oseo_endpoint(request):
 
     """
 
-    if request.method == 'POST':
+    if request.method == 'POST':  # OSEO requests are always POST
         server = OseoServer()
-        request_element = etree.fromstring(request.body)
+        headers = {}
         try:
+            request_element = etree.fromstring(request.body)
             soap_version = soap.get_soap_version(request_element)
-        except errors.NonSoapRequestError:
-            response = HttpResponseForbidden()  # FIXME: Check if this is it
+        except (errors.InvalidSoapVersionError, etree.XMLSyntaxError):
+            django_response = HttpResponseBadRequest()
         else:
-            headers = soap.get_http_headers(soap_version)
-            details = soap.unwrap_request(request_element)
-            request_data, user, password, password_attributes = details
-            # authenticate and authorize user
-            resp, status_code = server.process_request(request_data)
-            if soap_version is not None and status_code == 200:
-                soap.wrap_soap(resp, soap_version)
-            elif soap_version is not None and status_code != 200:
-                soap_code = None  # FIXME
-                soap.wrap_soap_fault(resp, soap_code, soap_version)
-            else:  # no need to wrap with SOAP
-                pass
-            response = HttpResponse(resp)
-            for k, v in headers.iteritems():
-                response[k] = v
+            try:
+                headers = soap.get_http_headers(soap_version)
+                details = soap.unwrap_request(request_element)
+                request_data, user, password, password_attributes = details
+                # authenticate and authorize user
+                process_response = server.process_request(request_data, user)
+                status_code = 200
+                if soap_version is None:
+                    response = process_response
+                else:
+                    response = soap.wrap_response(process_response,
+                                                  soap_version)
+            except errors.OseoError as err:
+                if err.code == "AuthorizationFailed":
+                    status_code = 401
+                else:
+                    status_code = 400
+                exception_report = server.create_exception_report(
+                    err.code, err.text, err.locator)
+                if soap_version is None:
+                    response = exception_report
+                else:
+                    soap_fault_code = soap.get_soap_fault_code(err.text)
+                    response = soap.wrap_soap_fault(exception_report,
+                                                    soap_fault_code,
+                                                    soap_version)
+                signals.invalid_request.send_robust(
+                    sender=__name__,
+                    request_data=request.body,
+                    exception_report=exception_report
+                )
+            except errors.ServerError:
+                raise
+            serialized = etree.tostring(response, encoding=server.ENCODING,
+                                        pretty_print=True)
+            django_response = HttpResponse(serialized)
+            django_response.status_code = status_code
+            for k, v in headers.items():
+                django_response[k] = v
     else:
-        response = HttpResponseForbidden()
-    return response
+        django_response = HttpResponseForbidden()
+    return django_response
 
 
 def get_ordered_file(request, user_name, order_id, item_id, file_name):
