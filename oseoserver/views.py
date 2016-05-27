@@ -9,9 +9,14 @@ from django.shortcuts import get_object_or_404, get_list_or_404
 from django.views.decorators.csrf import csrf_exempt
 from sendfile import sendfile
 
-from .server import OseoServer
+import oseoserver.soap
+from .constants import NAMESPACES
+from . import errors
 from . import models
 from . import utilities
+from . import soap
+from .auth import usernametoken
+from .server import OseoServer
 
 
 @csrf_exempt
@@ -27,10 +32,27 @@ def oseo_endpoint(request):
 
     if request.method == 'POST':
         server = OseoServer()
-        resp, status_code, headers = server.process_request(request.body)
-        response = HttpResponse(resp)
-        for k, v in headers.iteritems():
-            response[k] = v
+        request_element = etree.fromstring(request.body)
+        try:
+            soap_version = soap.get_soap_version(request_element)
+        except errors.NonSoapRequestError:
+            response = HttpResponseForbidden()  # FIXME: Check if this is it
+        else:
+            headers = soap.get_http_headers(soap_version)
+            details = soap.unwrap_request(request_element)
+            request_data, user, password, password_attributes = details
+            # authenticate and authorize user
+            resp, status_code = server.process_request(request_data)
+            if soap_version is not None and status_code == 200:
+                soap.wrap_soap(resp, soap_version)
+            elif soap_version is not None and status_code != 200:
+                soap_code = None  # FIXME
+                soap.wrap_soap_fault(resp, soap_code, soap_version)
+            else:  # no need to wrap with SOAP
+                pass
+            response = HttpResponse(resp)
+            for k, v in headers.iteritems():
+                response[k] = v
     else:
         response = HttpResponseForbidden()
     return response

@@ -73,9 +73,9 @@ OSEOSERVER_COLLECTIONS = get_setting(
     "OSEOSERVER_COLLECTIONS",
     [
         {
-            "name": "",
-            "catalogue_endpoint": "",
-            "collection_identifier": "",
+            "name": "dummy collection",
+            "catalogue_endpoint": "http://localhost",
+            "collection_identifier": "dummy_collection_id",
             "product_price": 0,
             "generation_frequency": "Once per hour",
             "product_orders": {

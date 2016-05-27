@@ -19,10 +19,11 @@ Some utility functions for pyoseo
 import importlib
 import logging
 
-from django.template.loader import render_to_string
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
+from django.template.loader import render_to_string
+
 #from django.contrib.sites.models import Site
 from mailqueue.models import MailerMessage
 from html2text import html2text

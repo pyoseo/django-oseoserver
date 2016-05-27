@@ -1,5 +1,6 @@
 """Unit tests for oseoserver.server"""
 
+from lxml import etree
 import pytest
 from pyxb import BIND
 from pyxb.bundles.opengis import oseo_1_0 as oseo
@@ -40,5 +41,12 @@ class TestServer(object):
 
         response, status, headers = server.process_request(request_data,
                                                            fake_user)
+        response_element = etree.fromstring(response)
         assert status == 200
+        assert headers["Content-Type"] == "application/soap+xml"
+        assert response_element.tag == "{{{}}}Envelope".format(
+            server._namespaces["soap"])
+        caps = response_element.xpath("soap:Body/oseo:Capabilities",
+                                      namespaces=server._namespaces)
+        assert len(caps) == 1
 
