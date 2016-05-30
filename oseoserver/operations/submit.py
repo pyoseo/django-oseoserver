@@ -12,10 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Implements the OSEO Submit operation
-"""
+"""Implements the OSEO Submit operation"""
 
+from __future__ import absolute_import
 import logging
 from datetime import datetime, timedelta
 import pytz
@@ -29,12 +28,16 @@ import pyxb.bundles.opengis.iso19139.v20070417.gco as gco
 from lxml import etree
 import requests
 
-from oseoserver import models
-from oseoserver import errors
-from oseoserver import utilities
-from oseoserver.utilities import _n, _c
-from oseoserver.server import OseoServer
-from oseoserver.operations.base import OseoOperation
+from .. import models
+from .. import errors
+from .. import utilities
+from .. import settings
+from ..utilities import _n, _c
+from ..server import OseoServer
+from ..constants import DeliveryOption
+from ..constants import OrderType
+from ..constants import MASSIVE_ORDER_REFERENCE
+from .base import OseoOperation
 
 logger = logging.getLogger(__name__)
 
@@ -83,30 +86,36 @@ class Submit(OseoOperation):
         return response, order
 
     def process_order_specification(self, order_specification, user):
+        """Validate and extract the order specification from the request
+
+        Parameters
+        ----------
+        order_specification: pyxb.Order
+            The input order specification
+        user: django.contrib.auth.User
+            The django user that made the request
+
+        Returns
+        -------
+        dict
+            The validate order specification
+
         """
-        Validate and extract the order specification from the request
 
-        :arg order_specification:
-        :type order_specification:
-        :arg user:
-        :type user:
-
-        :return:
-        :rtype: dict
-        """
-
+        order_type = self._get_order_type(order_specification)
+        self._validate_order_type(order_type)
         spec = {
-            "order_type": self._get_order_type(order_specification),
+            "order_type": order_type,
             "order_item": [],
         }
-        for oi in order_specification.orderItem:
-            item = self.validate_order_item(oi, spec["order_type"],
-                                            user)
-            spec["order_item"].append(item)
+        for order_item in order_specification.orderItem:
+            spec["order_item"].append(
+                self.validate_order_item(order_item, order_type, user)
+            )
         spec["requested_order_configurations"] = []
-        for col in set([i["collection"] for i in spec["order_item"]]):
+        for collection in set([i["collection"] for i in spec["order_item"]]):
             order_config = self._get_order_configuration(
-                col, spec["order_type"])
+                collection, order_type)
             spec["requested_order_configurations"].append(order_config)
         spec["order_reference"] = _c(order_specification.orderReference)
         spec["order_remark"] = _c(order_specification.orderRemark)
@@ -119,7 +128,7 @@ class Submit(OseoOperation):
             order_specification.invoiceAddress)
         spec["option"] = self._validate_global_options(
             order_specification,
-            spec["order_type"],
+            order_type,
             spec["requested_order_configurations"]
         )
         spec["delivery_options"] = self._validate_global_delivery_options(
@@ -129,8 +138,7 @@ class Submit(OseoOperation):
 
     def create_order(self, order_spec, user, status_notification, status,
                      additional_status_info, item_additional_status_info=""):
-        """
-        Persist the order specification in the database.
+        """Persist the order specification in the database.
 
         :param order_spec:
         :param user:
@@ -252,30 +260,26 @@ class Submit(OseoOperation):
                 }
         return address
 
-    def get_collection_id(self, item_id, user_group):
-        """
-        Search all of the defined catalogue endpoints and determine
-        the collection for the specified item.
+    def get_collection_id(self, item_id):
+        """Determine the collection identifier for the specified item.
 
         This method is used when the requested order item does not provide the
-        optional 'collectionId' element.
+        optional 'collectionId' element. It searched all of the defined
+        catalogue endpoints and determines the collection for the
+        specified item.
 
-        :param item_id: The identifier of the requested item in the CSW
-            catalogue
-        :type item_id: string
-        :param user_group: The group to which the user making the request
-            belongs
-        :type user_group: models.OseoGroup
-        :return:
+        Parameters
+        ----------
+        item_id: str
+            The identifier of the requested order item
+
+        Returns
+        -------
+
         """
 
-        request_headers = {
-            "Content-Type": "application/xml"
-        }
-        ns = {
-            "gmd": gmd.Namespace.uri(),
-            "gco": gco.Namespace.uri(),
-            }
+        request_headers = {"Content-Type": "application/xml"}
+        ns = {"gmd": gmd.Namespace.uri(), "gco": gco.Namespace.uri(),}
         req = csw.GetRecordById(
             service="CSW",
             version="2.0.2",
@@ -285,33 +289,38 @@ class Submit(OseoOperation):
         )
         query_path = ("gmd:MD_Metadata/gmd:parentIdentifier/"
                       "gco:CharacterString/text()")
-        collections = models.Collection.objects.filter(
-            authorized_groups=user_group)
-        endpoints = list(set([c.catalogue_endpoint for c in collections]))
-        collection_id = None
-        current = 0
-        while collection_id is None and current < len(endpoints):
-            url = endpoints[current]
-            response = requests.post(url, data=req.toxml(),
-                                     headers=request_headers)
-            if response.status_code != 200:
-                continue
-            r = etree.fromstring(response.text.encode(OseoServer.ENCODING))
-            id_container = r.xpath(query_path, namespaces=ns)
-            collection_id = id_container[0] if len(id_container) == 1 else None
-            current += 1
+        for collection in settings.OSEOSERVER_COLLECTIONS:
+            response = requests.post(
+                collection["catalogue_endpoint"],
+                data=req.toxml(),
+                headers=request_headers
+            )
+            if response.status_code == 200:
+                r = etree.fromstring(response.text.encode(OseoServer.ENCODING))
+                id_container = r.xpath(query_path, namespaces=ns)
+                if any(id_container):
+                    collection_id = id_container[0]
+                    break
+        else:
+            raise errors.OseoServerError("Could not retrieve collection "
+                                         "id for item {!r}".format(item_id))
         return collection_id
 
     def validate_order_item(self, requested_item, order_type, user):
-        """
+        """Validate an order item.
 
-        :param requested_item: The pyxb instance with the requested item
-        :type requested_item: oseo.CommonOrderItemType
-        :param order_type: The order type in use
-        :type order_type: models.OrderType
-        :param user: the user that has placed the order
-        :type user: models.OseoUser
-        :return:
+        Parameters
+        ----------
+        requested_item: pyxb.bundles.opengis.oseo_1_0.Order
+            The requested order item
+        order_type: oseoserver.constants.OrderType
+            The enumeration value of the requested order type
+        user: django.contrib.auth.User
+            The django user that made the request
+
+        Returns
+        -------
+
         """
 
         item = {
@@ -320,12 +329,11 @@ class Submit(OseoOperation):
                 requested_item.productOrderOptionsId),
             "order_item_remark": _c(requested_item.orderItemRemark)
         }
-        if order_type.name in (models.Order.PRODUCT_ORDER,
-                               models.Order.MASSIVE_ORDER):
+        if order_type in (OrderType.PRODUCT_ORDER, OrderType.MASSIVE_ORDER):
             identifier, collection = self._validate_product_order_item(
                 requested_item, user)
             item["identifier"] = identifier
-        elif order_type.name == models.Order.SUBSCRIPTION_ORDER:
+        elif order_type == OrderType.SUBSCRIPTION_ORDER:
             collection = self._validate_subscription_order_item(
                 requested_item, user)
         else:  # TASKING_ORDER
@@ -350,8 +358,7 @@ class Submit(OseoOperation):
         identifier = _c(requested_item.productId.identifier)
         col_id = requested_item.productId.collectionId
         if col_id is None:
-            col_id = self.get_collection_id(identifier,
-                                            user.oseo_group)
+            col_id = self.get_collection_id(identifier)
         collection = self._validate_requested_collection(col_id,
                                                          user.oseo_group)
         return identifier, collection
@@ -370,55 +377,69 @@ class Submit(OseoOperation):
         return tasking_id, collection
 
     def _get_order_configuration(self, collection, order_type):
+        """Get the configuration for the requested order type and collection.
+
+        Parameters
+        ----------
+        collection: str
+            The requested collection
+        order_type: oseoserver.constants.OrderType
+            The requested order type
+
+        Returns
+        -------
+        dict
+            A dictionary with the configuration of the requested collection
+
         """
 
-        :param collection:
-        :param order_type:
-        :type order_type: models.OrderType
-        :return:
-        """
-
-        if order_type.name == models.Order.PRODUCT_ORDER:
-            config = collection.productorderconfiguration
-        elif order_type.name == models.Order.MASSIVE_ORDER:
-            config = collection.massiveorderconfiguration
-        elif order_type.name == models.Order.SUBSCRIPTION_ORDER:
-            config = collection.subscriptionorderconfiguration
-        else:  # tasking order
-            config = collection.taskingorderconfiguration
-        if not config.enabled:
-            if order_type.name in (models.Order.PRODUCT_ORDER,
-                                   models.Order.MASSIVE_ORDER):
+        for collection_config in settings.OSEOSERVER_COLLECTIONS:
+            is_collection = collection_config.get("name") == collection
+            is_enabled = collection_config.get(order_type.value.lower(), False)
+            if is_collection and is_enabled:
+                result = collection_config
+                break
+        else:
+            if order_type in (OrderType.PRODUCT_ORDER,
+                              OrderType.MASSIVE_ORDER):
                 raise errors.ProductOrderingNotSupportedError()
-            elif order_type.name == models.Order.SUBSCRIPTION_ORDER:
+            elif order_type == OrderType.SUBSCRIPTION_ORDER:
                 raise errors.SubscriptionNotSupportedError()
-            elif order_type.name == models.Order.TASKING_ORDER:
+            elif order_type == OrderType.TASKING_ORDER:
                 raise errors.FutureProductNotSupportedError()
             else:
-                raise errors.InvalidParameterValueError("orderType")
-        return config
+                raise errors.OseoServerError(
+                    "Unable to get order configuration")
+        return result
 
     def _validate_requested_collection(self, collection_id, group):
-        try:
-            collection = models.Collection.objects.get(
-                collection_id=collection_id)
-            if not collection.allows_group(group):
-                raise errors.AuthorizationFailedError(locator="collectionId")
-        except models.Collection.DoesNotExist:
+        for collection_config in settings.OSEOSERVER_COLLECTIONS:
+            if collection_config["collection_identifier"] == collection_id:
+                result = collection_config
+                break
+        else:
             raise errors.InvalidParameterValueError("collectionId")
-        return collection
+        return result
 
     def _validate_requested_options(self, requested_item, order_type,
                                     order_config):
         """
 
-        :param requested_item:
-        :type requested_item:
-        :param order_type:
-        :type order_type: models.OrderType
-        :param order_config:
-        :type order_config:
-        :return:
+        Parameters
+        ----------
+        requested_item:
+            The requested item
+        order_type: oseoserver.constants.OrderType
+            The enumeration of the requested order type
+        order_config: dict
+            Configuration parameters for the requested order type and the
+            current collection
+
+        Returns
+        -------
+        dict
+            The validated options
+
         """
 
         valid_options = dict()
@@ -453,8 +474,7 @@ class Submit(OseoOperation):
         return options
 
     def _validate_selected_option(self, name, value, order_type, order_config):
-        """
-        Validate a selected option choice.
+        """Validate a selected option choice.
 
         The validation process first tries to extract the option's value as
         a simple text and matches it with the available choices for the
@@ -463,33 +483,39 @@ class Submit(OseoOperation):
         format. This parsed value is again matched against the available
         choices.
 
-        :param name: The name of the option
-        :type name: string
-        :param value: The XML element with the custom schema
-        :type value: lxml.etree.Element
-        :param order_type: the django record with the order type
-        :type order_type: models.OrderType
-        :param order_config:
-        :type order_config:
-        :return:
-        :rtype:
+        Parameters
+        ----------
+        name: str
+            The name of the option
+        value: lxml.etree.Element
+            The XML element with the custom schema
+        order_type: oseoserver.constants.OrderType
+            The enumeration of the requested order type
+        order_config: dict
+            Configuration parameters for the requested order type and the
+            current collection
+
+        Returns
+        -------
+
         """
 
-        logger_type = "pyoseo"
         try:
-            option = order_config.options.get(name=name)
-            choices = [c.value for c in option.choices.all()]
+            option_config = [opt for opt in settings.OSEOSERVER_OPTIONS
+                             if opt["name"] == name][0]
+            if name not in order_config["options"]:
+                raise errors.InvalidParameterValueError(locator="option",
+                                                        value=name)
+            choices = option_config.get("choices", [])
             if len(choices) > 0:
-                naive_value = value.text
-                if naive_value in choices:
-                    result = naive_value
+                if value.text in choices:
+                    result = value.text
                 else:
-                    processing_class, params = utilities.get_custom_code(
+                    ProcessingClass, params = utilities.get_custom_code(
                         order_type,
                         models.ItemProcessor.PROCESSING_PARSE_OPTION
                     )
-                    handler = utilities.import_class(processing_class,
-                                                     logger_type=logger_type)
+                    handler = utilities.import_class(ProcessingClass)
                     parsed_value = handler.parse_option(name, value, **params)
                     if parsed_value in choices:
                         result = parsed_value
@@ -497,32 +523,43 @@ class Submit(OseoOperation):
                         raise errors.InvalidParameterValueError(
                             "option", value=parsed_value)
             else:
-                processing_class, params = utilities.get_custom_code(
+                ProcessingClass, params = utilities.get_custom_code(
                     order_type,
                     models.ItemProcessor.PROCESSING_PARSE_OPTION
                 )
-                handler = utilities.import_class(processing_class,
-                                                 logger_type=logger_type)
+                handler = utilities.import_class(ProcessingClass)
                 result = handler.parse_option(name, value, **params)
-        except errors.InvalidParameterValueError:
-            raise
-        except models.Option.DoesNotExist:
-            raise errors.InvalidParameterValueError("option", value=name)
+        except KeyError:
+            raise errors.InvalidParameterValueError(locator="option",
+                                                    value=name)
         except Exception as e:
             logger.error(e)
             raise errors.ServerError(*e.args)
         return result
 
     def _validate_delivery_options(self, requested_item, order_config):
-        """
-        Validate the requested delivery options for an item.
+        """Validate the requested delivery options for an item.
 
         The input requested_item can be an order or an order item
 
-        :param requested_item: oseo.Order or oseo.OrderItem
-        :param order_config: models.rderConfiguration
-        :return: The requested delivery options
-        :rtype: dict()
+        Parameters
+        ----------
+        requested_item: oseo.OrderSpecification
+            The order or order item to validate
+        order_config: dict
+            A configuration dictionary that holds information on the types
+            of orders accepted
+
+        Returns
+        -------
+        dict
+            The requested delivery options, alraedy validated
+
+        Raises
+        ------
+        oseoserver.errors.InvalidParameterValueError
+            When some parameter has an invalid value
+
         """
 
         delivery = None
@@ -531,18 +568,21 @@ class Submit(OseoOperation):
             delivery = dict()
             try:
                 if dop.onlineDataAccess is not None:
-                    p = dop.onlineDataAccess.protocol
+                    protocol = dop.onlineDataAccess.protocol
                     delivery["type"] = order_config.delivery_options.get(
-                        onlinedataaccess__protocol=p)
+                        onlinedataaccess__protocol=protocol)
+
+                    if protocol in settings.OSEOSERVER_COLLECTIONS
+                    delivery["type"] = DeliveryOption.ONLINE_DATA_ACCESS
                 elif dop.onlineDataDelivery is not None:
-                    p = dop.onlineDataAccess.protocol
+                    protocol = dop.onlineDataAccess.protocol
                     delivery["type"] = order_config.delivery_options.get(
-                        onlinedatadelivery__protocol=p)
+                        onlinedatadelivery__protocol=protocol)
                 else:
-                    p = dop.mediaDelivery.packageMedium,
+                    protocol = dop.mediaDelivery.packageMedium,
                     s = dop.mediaDelivery.shippingInstructions,
                     delivery["type"] = order_config.delivery_options.get(
-                        mediadelivery__package_medium=p,
+                        mediadelivery__package_medium=protocol,
                         mediadelivery__shipping_instructions=s)
             except models.DeliveryOption.DoesNotExist:
                 raise errors.InvalidParameterValueError("deliveryOptions")
@@ -554,13 +594,12 @@ class Submit(OseoOperation):
 
     def _validate_global_delivery_options(self, requested_order_spec,
                                           ordered_order_configs):
-        """
-        Validate global order delivery options.
+        """Validate global order delivery options.
 
-        PyOSEO only accepts global options that are valid for each of the
-        order items contained in the order. As such, the requested
-        delivery options must be valid according to all of order
-        configurations of the ordered collections.
+        Oseoserver only accepts global options that are valid for each of the
+        order items contained in the order. As such, the requested delivery
+        options must be valid according to all of order configurations of the
+        ordered collections.
 
         :param requested_order_spec:
         :param ordered_order_configs:
@@ -573,8 +612,7 @@ class Submit(OseoOperation):
         return delivery_options
 
     def _get_order_type(self, order_specification):
-        """
-        Return the order type for the input order specification.
+        """Return the order type for the input order specification.
 
         Usually the order type can be extracted directly from the order
         specification, as the OSEO standard defines only PRODUCT ORDER,
@@ -582,23 +620,43 @@ class Submit(OseoOperation):
         MASSIVE ORDER, which is based on the existence of a special reference
         on orders of type PRODUCT ORDER.
 
-        :param order_specification:
-        :type order_specification: oseo.Submit
-        :return:
-        :rtype: models.OrderType
+        Parameters
+        ----------
+        order_specification: oseo.Submit
+            the submitted request
+
+        Returns
+        -------
+        constants.OrderType
+            The enumeration value for the requested order type
+
         """
 
-        order_type = models.OrderType.objects.get(
-            name=order_specification.orderType)
-        if order_type.name == "PRODUCT_ORDER":
-            ref = _c(order_specification.orderReference)
-            massive_reference = models.Order.MASSIVE_ORDER_REFERENCE
-            if massive_reference is not None and ref == massive_reference:
-                order_type = models.OrderType.objects.get(
-                    name="MASSIVE_ORDER")
-        if not order_type.enabled:
-            raise errors.InvalidOrderTypeError(order_type.name)
-        return order_type
+        requested = OrderType(order_specification.orderType)
+        if requested == OrderType.PRODUCT_ORDER:
+            reference = _c(order_specification.orderReference)
+            if reference == MASSIVE_ORDER_REFERENCE:
+                requested = OrderType.MASSIVE_ORDER
+        return requested
+
+    def _get_generic_order_config(self, order_type):
+        return getattr(settings,
+                       "OSEOSERVER_{}".format(order_type.value.lower()),
+                       {})
+
+    def _validate_order_type(self, order_type):
+        generic_config = self._get_generic_order_config(order_type)
+        if not generic_config.get("enabled", False):
+            if order_type in (OrderType.PRODUCT_ORDER,
+                              OrderType.MASSIVE_ORDER):
+                raise errors.ProductOrderingNotSupportedError()
+            elif order_type == OrderType.SUBSCRIPTION_ORDER:
+                raise errors.SubscriptionNotSupportedError()
+            elif order_type == OrderType.TASKING_ORDER:
+                raise errors.FutureProductNotSupportedError()
+            else:
+                raise errors.OseoServerError("Invalid order type: "
+                                             "{}".format(order_type))
 
     def _validate_packaging(self, requested_packaging):
         packaging = _c(requested_packaging)

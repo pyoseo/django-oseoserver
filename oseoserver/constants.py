@@ -17,7 +17,7 @@ class OrderStatus(enum.Enum):
     IN_PRODUCTION = "InProduction"
     SUSPENDED = "Suspended"
     CANCELLED = "Cancelled"
-    COMPLETEd = "Completed"
+    COMPLETED = "Completed"
     FAILED = "Failed"
     TERMINATED = "Terminated"
     DOWNLOADED = "Downloaded"
@@ -40,6 +40,54 @@ class Presentation(enum.Enum):
 
     BRIEF = "brief"
     FULL = "full"
+
+
+class DeliveryOption(enum.Enum):
+
+    MEDIA_DELIVERY = "mediadelivery"
+    ONLINE_DATA_ACCESS = "onlinedataaccess"
+    ONLINE_DATA_DELIVERY = "onlinedatadelivery"
+
+
+class DeliveryOptionProtocol(enum.Enum):
+
+    FTP = "ftp"
+    SFTP = "sftp"
+    FTPS = "ftps"
+    P2P = "P2P"
+    WCS = "wcs"
+    WMS = "wms"
+    E_MAIL = "e-mail"
+    DDS = "dds"
+    HTTP = "http"
+    HTTPS = "https"
+
+
+class DeliveryMedium(enum.Enum):
+
+    NTP = "NTP"
+    DAT = "DAT"
+    EXABYTE = "Exabyte"
+    CD_ROM = "CD-ROM"
+    DLT = "DLT"
+    D1 = "D1"
+    DVD = "DVD"
+    BD = "BD"
+    LTO = "LTO"
+    LTO2 = "LTO2"
+    LTO4 = "LTO4"
+
+
+class DeliveryMethod(enum.Enum):
+
+    EACH_READY = "as each product is reasy"
+    ALL_READY = "once all products are ready"
+    OTHER = "other"
+
+
+class Packaging(enum.Enum):
+
+    ZIP = "zip"
 
 
 MASSIVE_ORDER_REFERENCE = 'Massive order'

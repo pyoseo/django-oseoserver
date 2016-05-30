@@ -42,8 +42,8 @@ def import_class(python_path, *instance_args, **instance_kwargs):
     return instance
 
 
-def get_custom_code(order_type, processing_step):
-    item_processor = order_type.item_processor
+def get_custom_code(generic_order_configuration, processing_step):
+    item_processor = generic_order_configuration["processor"]
     processing_class = item_processor.python_path
     params = item_processor.export_params(processing_step)
     logger.debug('processing_class: {}'.format(processing_class))

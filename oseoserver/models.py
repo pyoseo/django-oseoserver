@@ -22,7 +22,6 @@ from decimal import Decimal
 
 from django.db import models
 
-from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
 from django.conf import settings as django_settings
 import pytz
@@ -32,7 +31,14 @@ import pyxb.bundles.opengis.oseo_1_0 as oseo
 from . import managers
 from . import errors
 from . import settings
-from . import constants
+from .constants import DeliveryOption
+from .constants import MASSIVE_ORDER_REFERENCE
+from .constants import OrderStatus
+from .constants import OrderType
+from .constants import Packaging
+from .constants import Presentation
+from .constants import Priority
+from .constants import StatusNotification
 from .utilities import _n
 
 
@@ -72,28 +78,6 @@ class AbstractDeliveryAddress(models.Model):
         return delivery_address
 
 
-class AbstractOption(models.Model):
-    name = models.CharField(max_length=100)
-    description = models.CharField(max_length=255, blank=True)
-    multiple_entries = models.BooleanField(
-        default=False,
-        help_text="Can this option have multiple selections?"
-    )
-
-    class Meta:
-        abstract = True
-
-
-class AbstractOptionChoice(models.Model):
-    value = models.CharField(max_length=255, help_text="Value for this option")
-
-    class Meta:
-        abstract = True
-
-    def __unicode__(self):
-        return self.value
-
-
 class Batch(models.Model):
     # subFunction values for DescribeResultAccess operation
     ALL_READY = "allReady"
@@ -106,19 +90,19 @@ class Batch(models.Model):
 
     def status(self):
         order = {
-            constants.OrderStatus.SUBMITTED.value: 0,
-            constants.OrderStatus.ACCEPTED.value: 1,
-            constants.OrderStatus.IN_PRODUCTION.value: 2,
-            constants.OrderStatus.SUSPENDED.value: 3,
-            constants.OrderStatus.CANCELLED.value: 4,
-            constants.OrderStatus.COMPLETEd.value: 5,
-            constants.OrderStatus.FAILED.value: 6,
-            constants.OrderStatus.TERMINATED.value: 7,
-            constants.OrderStatus.DOWNLOADED.value: 8,
+            OrderStatus.SUBMITTED.value: 0,
+            OrderStatus.ACCEPTED.value: 1,
+            OrderStatus.IN_PRODUCTION.value: 2,
+            OrderStatus.SUSPENDED.value: 3,
+            OrderStatus.CANCELLED.value: 4,
+            OrderStatus.COMPLETED.value: 5,
+            OrderStatus.FAILED.value: 6,
+            OrderStatus.TERMINATED.value: 7,
+            OrderStatus.DOWNLOADED.value: 8,
         }
         item_statuses = set([oi.status for oi in self.order_items.all()])
-        if CustomizableItem.FAILED.value in item_statuses:
-            status = CustomizableItem.FAILED.value
+        if OrderStatus.FAILED.value in item_statuses:
+            status = OrderStatus.FAILED.value
         elif len(item_statuses) == 1:
             status = item_statuses.pop()
         elif any(item_statuses):
@@ -146,18 +130,22 @@ class Batch(models.Model):
             item_id=order_item_spec["item_id"]
         )
         item.save()
-        for k, v in order_item_spec["option"].items():
-            option = Option.objects.get(name=k)
-            item.selected_options.add(SelectedOption(option=option,
-                                                     value=v))
-        for k, v in order_item_spec["scene_selection"].items():
+        for name, value in order_item_spec["option"].items():
+            # assuming that the option has already been validated
+            item.selected_options.add(SelectedOption(option=value,
+                                                     value=value))
+        for name, value in order_item_spec["scene_selection"].items():
             item.selected_scene_selection_options.add(
-                SelectedSceneSelectionOption(option=k, value=v))
+                SelectedSceneSelectionOption(option=name, value=value))
         delivery = order_item_spec["delivery_options"]
         if delivery is not None:
             copies = 1 if delivery["copies"] is None else delivery["copies"]
             sdo = SelectedDeliveryOption(
                 customizable_item=item,
+
+                delivery_type=None,
+                delivery_details=None,
+
                 annotation=delivery["annotation"],
                 copies=copies,
                 special_instructions=delivery["special_instructions"],
@@ -165,9 +153,8 @@ class Batch(models.Model):
             )
             sdo.save()
         if order_item_spec["payment"] is not None:
-            payment = PaymentOption.objects.get(order_item_spec["payment"])
             item.selected_payment_option = SelectedPaymentOption(
-                option=payment)
+                option=order_item_spec["payment"])
         item.save()
         return item
 
@@ -181,7 +168,7 @@ class Batch(models.Model):
         last_time = self.order.last_describe_result_access_request
         order_delivery = self.order.selected_delivery_option.option
         completed = []
-        if self.status() != CustomizableItem.COMPLETED:
+        if self.status() != OrderStatus.COMPLETED.value:
             # batch is either still being processed,
             # failed or already downloaded, so we don't care for it
             pass
@@ -193,16 +180,16 @@ class Batch(models.Model):
                     delivery = oi.selected_delivery_option.option
                 except SelectedDeliveryOption.DoesNotExist:
                     delivery = order_delivery
-                if not hasattr(delivery, "onlinedataaccess"):
+                if delivery != DeliveryOption.ONLINE_DATA_ACCESS.value:
                     # getStatus only applies to items with onlinedataaccess
                     continue
-                if oi.status == CustomizableItem.COMPLETED:
+                if oi.status == OrderStatus.COMPLETED.value:
                     if (last_time is None or behaviour == self.ALL_READY) or \
                             (behaviour == self.NEXT_READY and
                                      oi.completed_on >= last_time):
                         for f in oi.files.filter(available=True):
                             batch_complete_items.append((f, delivery))
-            if self.order.packaging == Order.ZIP:
+            if self.order.packaging == Packaging.ZIP.value:
                 if len(batch_complete_items) == len(order_items):
                     # the zip is ready, lets get only a single file
                     # because they all point to the same URL
@@ -220,73 +207,10 @@ class Batch(models.Model):
         return str("{}({})".format(self.__class__.__name__, self.id))
 
 
-#class Collection(models.Model):
-#    name = models.CharField(max_length=50, unique=True)
-#    #authorized_groups = models.ManyToManyField("OseoGroup", null=True,
-#    #                                           blank=True)
-#    catalogue_endpoint = models.CharField(
-#        max_length=255,
-#        help_text="URL of the CSW server where this collection is available"
-#    )
-#    collection_id = models.CharField(
-#        max_length=255,
-#        unique=True,
-#        help_text="Identifier of the dataset series for this collection in "
-#                  "the catalogue"
-#    )
-#    product_price = models.DecimalField(
-#        max_digits=5, decimal_places=2,
-#        help_text="The price of an individual product",
-#        default=Decimal(0)
-#    )
-#    generation_frequency = models.CharField(
-#        max_length=255,
-#        help_text="Frequency at which new products get generated",
-#        blank=True,
-#        default="once per hour"
-#    )
-#
-#    def _product_orders_enabled(self):
-#        return "enabled" if self.productorderconfiguration.enabled \
-#            else "disabled"
-#    product_orders = property(_product_orders_enabled)
-#
-#    def _massive_orders_enabled(self):
-#        return "enabled" if self.massiveorderconfiguration.enabled \
-#            else "disabled"
-#    massive_orders = property(_massive_orders_enabled)
-#
-#    def _subscription_orders_enabled(self):
-#        return "enabled" if self.subscriptionorderconfiguration.enabled \
-#            else "disabled"
-#    subscription_orders = property(_subscription_orders_enabled)
-#
-#    def _tasking_orders_enabled(self):
-#        return "enabled" if self.taskingorderconfiguration.enabled \
-#            else "disabled"
-#    tasking_orders = property(_tasking_orders_enabled)
-#
-#    def allows_group(self, oseo_group):
-#        """
-#        Specify whether the input oseo_group can order from this collection
-#        """
-#
-#        result = True
-#        try:
-#            self.authorized_groups.get(name=oseo_group.name)
-#        except self.DoesNotExist:
-#            result = False
-#        return result
-#
-#    def __unicode__(self):
-#        return self.name
-
-
 class CustomizableItem(models.Model):
-    STATUS_CHOICES = [(status.value, status.value) for status in
-                      constants.OrderStatus]
+    STATUS_CHOICES = [(status.value, status.value) for status in OrderStatus]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES,
-                              default=constants.OrderStatus.SUBMITTED.value,
+                              default=OrderStatus.SUBMITTED.value,
                               help_text="initial status")
     additional_status_info = models.TextField(help_text="Additional "
                                               "information about the status",
@@ -318,6 +242,20 @@ class CustomizableItem(models.Model):
         :type db_item: pyoseo.models.CustomizableItem
         :return: A pyxb object with the delivery options
         """
+
+        do = self.selected_delivery_option
+        dot = oseo.DeliveryOptionsType()
+        if do == DeliveryOption.ONLINE_DATA_ACCESS.value:
+            dot.onlineDataAccess = pyxb.BIND()
+            dot.onlineDataAccess.protocol = do.protocol
+            pass
+        elif do == DeliveryOption.ONLINE_DATA_DELIVERY.value:
+            pass
+        elif do == DeliveryOption.MEDIA_DELIVERY.value:
+            pass
+        else:
+            pass  # raise some error
+
 
         try:
             do = self.selected_delivery_option
@@ -391,50 +329,6 @@ class DeliveryInformation(AbstractDeliveryAddress):
         return del_info
 
 
-class DeliveryOption(models.Model):
-    FTP = "ftp"
-    SFTP = "sftp"
-    FTPS = "ftps"
-    P2P = "P2P"
-    WCS = "wcs"
-    WMS = "wms"
-    E_MAIL = "e-mail"
-    DDS = "dds"
-    HTTP = "http"
-    HTTPS = "https"
-    PROTOCOL_CHOICES = (
-        (FTP, FTP),
-        (SFTP, SFTP),
-        (FTPS, FTPS),
-        (P2P, P2P),
-        (WCS, WCS),
-        (WMS, WMS),
-        (E_MAIL, E_MAIL),
-        (DDS, DDS),
-        (HTTP, HTTP),
-        (HTTPS, HTTPS),
-    )
-    delivery_fee = models.DecimalField(default=Decimal(0), max_digits=5,
-                                       decimal_places=2)
-
-    def child_instance(self):
-        try:
-            instance = OnlineDataAccess.objects.get(id=self.id)
-        except ObjectDoesNotExist:
-            try:
-                instance = OnlineDataDelivery.objects.get(id=self.id)
-            except ObjectDoesNotExist:
-                try:
-                    instance = MediaDelivery.objects.get(id=self.id)
-                except ObjectDoesNotExist:
-                    instance = self
-        return instance
-
-    def __unicode__(self):
-        instance = self.child_instance()
-        return instance.__unicode__()
-
-
 class InvoiceAddress(AbstractDeliveryAddress):
     order = models.OneToOneField("Order", null=True,
                                  related_name="invoice_address")
@@ -473,102 +367,6 @@ class ItemProcessor(models.Model):
         return self.python_path
 
 
-class MediaDelivery(DeliveryOption):
-    NTP = "NTP"
-    DAT = "DAT"
-    EXABYTE = "Exabyte"
-    CD_ROM = "CD-ROM"
-    DLT = "DLT"
-    D1 = "D1"
-    DVD = "DVD"
-    BD = "BD"
-    LTO = "LTO"
-    LTO2 = "LTO2"
-    LTO4 = "LTO4"
-    PACKAGE_MEDIUM_CHOICES = (
-        (NTP, NTP),
-        (DAT, DAT),
-        (EXABYTE, EXABYTE),
-        (CD_ROM, CD_ROM),
-        (DLT, DLT),
-        (D1, D1),
-        (DVD, DVD),
-        (BD, BD),
-        (LTO, LTO),
-        (LTO2, LTO2),
-        (LTO4, LTO4),
-    )
-
-    package_medium = models.CharField(
-        max_length=20,
-        choices=PACKAGE_MEDIUM_CHOICES,
-        blank=True
-    )
-    EACH_READY = "as each product is ready"
-    ALL_READY = "once all products are ready"
-    OTHER = "other"
-    SHIPPING_CHOICES = (
-        (EACH_READY, EACH_READY),
-        (ALL_READY, ALL_READY),
-        (OTHER, OTHER),
-    )
-    shipping_instructions = models.CharField(
-        max_length=100,
-        choices=SHIPPING_CHOICES,
-        blank=True
-    )
-
-    class Meta:
-        verbose_name_plural = "media deliveries"
-        unique_together = ("package_medium", "shipping_instructions")
-
-    def __unicode__(self):
-        return "{}:{}:{}".format(self.__class__.__name__, self.package_medium,
-                                 self.shipping_instructions)
-
-
-class Option(AbstractOption):
-
-    def _get_choices(self):
-        return ", ".join([c.value for c in self.choices.all()])
-    available_choices = property(_get_choices)
-
-    def __unicode__(self):
-        return self.name
-
-
-class OptionChoice(AbstractOptionChoice):
-    option = models.ForeignKey('Option', related_name='choices')
-
-
-class OnlineDataAccess(DeliveryOption):
-    protocol = models.CharField(max_length=20,
-                                choices=DeliveryOption.PROTOCOL_CHOICES,
-                                default=DeliveryOption.FTP,
-                                unique=True)
-
-    class Meta:
-        verbose_name_plural = 'online data accesses'
-
-    def __unicode__(self):
-        return "{}:{}".format(self.__class__.__name__, self.protocol)
-
-
-class OnlineDataDelivery(DeliveryOption):
-    protocol = models.CharField(
-        max_length=20,
-        choices=DeliveryOption.PROTOCOL_CHOICES,
-        default=DeliveryOption.FTP,
-        unique=True
-    )
-
-    class Meta:
-        verbose_name_plural = 'online data deliveries'
-
-    def __unicode__(self):
-        return "{}:{}".format(self.__class__.__name__, self.protocol)
-
-
 class OnlineAddress(models.Model):
     FTP = 'ftp'
     SFTP = 'sftp'
@@ -590,54 +388,17 @@ class OnlineAddress(models.Model):
         verbose_name_plural = 'online addresses'
 
 
-#class OrderConfiguration(models.Model):
-#
-#    enabled = models.BooleanField(default=False)
-#    order_processing_fee = models.DecimalField(default=Decimal(0),
-#                                               max_digits=5,
-#                                               decimal_places=2)
-#    options = models.ManyToManyField("Option", blank=True)
-#    delivery_options = models.ManyToManyField("DeliveryOption", blank=True)
-#    payment_options = models.ManyToManyField("PaymentOption", blank=True)
-#    scene_selection_options = models.ManyToManyField("SceneSelectionOption",
-#                                                     blank=True)
-#
-#    def __unicode__(self):
-#        return "{}".format("Enabled" if self.enabled else "Disabled")
-#
-#
-#class ProductOrderConfiguration(OrderConfiguration):
-#    collection = models.OneToOneField("Collection", null=False)
-#
-#
-#class MassiveOrderConfiguration(OrderConfiguration):
-#    collection = models.OneToOneField("Collection", null=False)
-#
-#
-#class SubscriptionOrderConfiguration(OrderConfiguration):
-#    collection = models.OneToOneField("Collection", null=False)
-#
-#
-#class TaskingOrderConfiguration(OrderConfiguration):
-#    collection = models.OneToOneField("Collection", null=False)
-
-
 class Order(CustomizableItem):
     MAX_ORDER_ITEMS = settings.OSEOSERVER_MAX_ORDER_ITEMS
 
-    ZIP = "zip"
-    PACKAGING_CHOICES = (
-        (ZIP, ZIP),
-    )
-    ORDER_TYPE_CHOICES = [(t.value, t.value) for t in constants.OrderType]
+    PACKAGING_CHOICES = [(v.value, v.value) for v in Packaging]
+    ORDER_TYPE_CHOICES = [(t.value, t.value) for t in OrderType]
 
-    #user = models.ForeignKey("OseoUser", related_name="orders")
     user = models.ForeignKey(django_settings.AUTH_USER_MODEL,
                              related_name="orders")
-    #order_type = models.ForeignKey("OrderType", related_name="orders")
     order_type = models.CharField(
         max_length=30,
-        default=constants.OrderType.PRODUCT_ORDER.value,
+        default=OrderType.PRODUCT_ORDER.value,
         choices=ORDER_TYPE_CHOICES
     )
 
@@ -653,13 +414,13 @@ class Order(CustomizableItem):
                                  blank=True)
     priority = models.CharField(
         max_length=30,
-        choices=[(p.value, p.value) for p in constants.Priority],
+        choices=[(p.value, p.value) for p in Priority],
         blank=True
     )
     status_notification = models.CharField(
         max_length=10,
-        default=constants.StatusNotification.NONE.value,
-        choices=[(n.value, n.value) for n in constants.StatusNotification]
+        default=StatusNotification.NONE.value,
+        choices=[(n.value, n.value) for n in StatusNotification]
     )
 
     def show_batches(self):
@@ -678,11 +439,11 @@ class Order(CustomizableItem):
         return batch
 
     def create_oseo_order_monitor(
-            self, presentation=constants.Presentation.BRIEF.value):
+            self, presentation=Presentation.BRIEF.value):
         om = oseo.CommonOrderMonitorSpecification()
-        if self.order_type == constants.OrderType.MASSIVE_ORDER.value:
-            om.orderType = constants.OrderType.PRODUCT_ORDER.value
-            om.orderReference = constants.MASSIVE_ORDER_REFERENCE
+        if self.order_type == OrderType.MASSIVE_ORDER.value:
+            om.orderType = OrderType.PRODUCT_ORDER.value
+            om.orderReference = MASSIVE_ORDER_REFERENCE
         else:
             om.orderType = self.order_type
             om.orderReference = _n(self.reference)
@@ -708,12 +469,12 @@ class Order(CustomizableItem):
         # add any 'option' elements
         om.deliveryOptions = self.create_oseo_delivery_options()
         om.priority = _n(self.priority)
-        if presentation == constants.Presentation.FULL.value:
-            if self.order_type == constants.OrderType.PRODUCT_ORDER.value:
+        if presentation == Presentation.FULL.value:
+            if self.order_type == OrderType.PRODUCT_ORDER.value:
                 batch = self.batches.get()
                 sits = batch.create_oseo_items_status()
                 om.orderItem.extend(sits)
-            elif self.order_type == constants.OrderType.SUBSCRIPTION_ORDER.value:
+            elif self.order_type == OrderType.SUBSCRIPTION_ORDER.value:
                 for batch in self.batches.all()[1:]:
                     sits = batch.create_oseo_items_status()
                     om.orderItem.extend(sits)
@@ -798,25 +559,8 @@ class TaskingOrder(DerivedOrder):
         return "{}({})".format(self.__class__.__name__, self.id)
 
 
-#class OrderType(models.Model):
-#    name = models.CharField(max_length=30)
-#    enabled = models.BooleanField(default=False)
-#    automatic_approval = models.BooleanField(default=False)
-#    notify_creation = models.BooleanField(default=True)
-#    item_processor = models.ForeignKey("ItemProcessor")
-#    item_availability_days = models.PositiveSmallIntegerField(
-#        default=10,
-#        help_text="How many days will an item be available for "
-#                  "download after it has been generated?"
-#    )
-#
-#    def __unicode__(self):
-#        return self.name
-
-
 class OrderItem(CustomizableItem):
     batch = models.ForeignKey("Batch", related_name="order_items")
-    #collection = models.ForeignKey("Collection")
     collection = models.CharField(
         max_length=255,
         choices=COLLECTION_CHOICES
@@ -918,44 +662,10 @@ class OseoFile(models.Model):
         return self.url
 
 
-#class OseoGroup(models.Model):
-#    name = models.CharField(max_length=50)
-#    description = models.TextField(blank=True)
-#    authentication_class = models.CharField(
-#        max_length=255,
-#        help_text="Python path to a custom authentication class to use when"
-#                  "validating orders for users belonging to this group",
-#        blank=True
-#    )
-#    # these fields are probably not needed
+#class PaymentOption(AbstractOption):
 #
 #    def __unicode__(self):
 #        return self.name
-
-
-#class OseoUser(models.Model):
-#    user = models.OneToOneField(User)
-#    oseo_group = models.ForeignKey("OseoGroup", blank=True, null=True)
-#    disk_quota = models.SmallIntegerField(default=50, help_text='Disk space '
-#                                          'available to each user. Expressed '
-#                                          'in Gigabytes')
-#    delete_downloaded_order_files = models.BooleanField(
-#        default=True,
-#        help_text='If this option is selected, ordered items will be deleted '
-#                  'from the server as soon as their download has been '
-#                  'aknowledged. If not, the ordered items are only deleted '
-#                  'after the expiration of the "order availability time" '
-#                  'period.'
-#    )
-#
-#    def __unicode__(self):
-#        return self.user.username
-
-
-class PaymentOption(AbstractOption):
-
-    def __unicode__(self):
-        return self.name
 
 
 class ProcessorParameter(models.Model):
@@ -971,21 +681,22 @@ class ProcessorParameter(models.Model):
         return self.name
 
 
-class SceneSelectionOption(AbstractOption):
+#class SceneSelectionOption(AbstractOption):
+#
+#    def __unicode__(self):
+#        return self.name
 
-    def __unicode__(self):
-        return self.name
 
-
-class SceneSelectionOptionChoice(AbstractOptionChoice):
-    scene_selection_option = models.ForeignKey('SceneSelectionOption',
-                                               related_name='choices')
+#class SceneSelectionOptionChoice(AbstractOptionChoice):
+#    scene_selection_option = models.ForeignKey('SceneSelectionOption',
+#                                               related_name='choices')
 
 
 class SelectedOption(models.Model):
     customizable_item = models.ForeignKey('CustomizableItem',
                                           related_name='selected_options')
-    option = models.ForeignKey('Option')
+    #option = models.ForeignKey('Option')
+    option = models.CharField(max_length=255)
     value = models.CharField(max_length=255, help_text='Value for this option')
 
     def __unicode__(self):
@@ -997,7 +708,8 @@ class SelectedPaymentOption(models.Model):
                                       related_name='selected_payment_option',
                                       null=True,
                                       blank=True)
-    option = models.ForeignKey('PaymentOption')
+    #option = models.ForeignKey('PaymentOption')
+    option = models.CharField(max_length=255)
 
     def __unicode__(self):
         return self.option.name
@@ -1008,7 +720,8 @@ class SelectedSceneSelectionOption(models.Model):
         'OrderItem',
         related_name='selected_scene_selection_options'
     )
-    option = models.ForeignKey('SceneSelectionOption')
+    #option = models.ForeignKey('SceneSelectionOption')
+    option = models.CharField(max_length=255)
     value = models.CharField(max_length=255,
                              help_text='Value for this option')
 
@@ -1017,13 +730,30 @@ class SelectedSceneSelectionOption(models.Model):
 
 
 class SelectedDeliveryOption(models.Model):
+    DELIVERY_CHOICES = [(v.value, v.value) for v in DeliveryOption]
+
     customizable_item = models.OneToOneField(
         'CustomizableItem',
         related_name='selected_delivery_option',
         blank=True,
         null=True
     )
-    option = models.ForeignKey('DeliveryOption')
+    #option = models.ForeignKey('DeliveryOption')
+    delivery_type = models.CharField(
+        max_length=30,
+        choices=DELIVERY_CHOICES,
+        default=DeliveryOption.ONLINE_DATA_ACCESS.value,
+        help="Type of delivery that has been specified"
+    )
+    delivery_details = models.CharField(
+        max_length=255,
+        null=False,
+        blank=False,
+        help="A comma separated string with further details pertaining the "
+             "selected delivery type, such as the protocol to use for online "
+             "data delivery. Each delivery type expects a concrete string"
+             "format."
+    )
     copies = models.PositiveSmallIntegerField(null=True, blank=True)
     annotation = models.TextField(blank=True)
     special_instructions = models.TextField(blank=True)
@@ -1034,7 +764,6 @@ class SelectedDeliveryOption(models.Model):
 
 class SubscriptionBatch(Batch):
     timeslot = models.DateTimeField()
-    #collection = models.ForeignKey(Collection)
     collection = models.CharField(
         max_length=255,
         choices=COLLECTION_CHOICES
@@ -1045,4 +774,124 @@ class SubscriptionBatch(Batch):
 
     def __unicode__(self):
         return str("{}({})".format(self.__class__.__name__, self.id))
+
+
+#class AbstractOption(models.Model):
+#    name = models.CharField(max_length=100)
+#    description = models.CharField(max_length=255, blank=True)
+#    multiple_entries = models.BooleanField(
+#        default=False,
+#        help_text="Can this option have multiple selections?"
+#    )
+#
+#    class Meta:
+#        abstract = True
+
+
+#class AbstractOptionChoice(models.Model):
+#    value = models.CharField(max_length=255, help_text="Value for this option")
+#
+#    class Meta:
+#        abstract = True
+#
+#    def __unicode__(self):
+#        return self.value
+
+
+#class DeliveryOption(models.Model):
+#    PROTOCOL_CHOICES = [(protocol.value, protocol.value) for protocol in
+#                      constants.DeliveryOptionProtocol]
+#    delivery_fee = models.DecimalField(default=Decimal(0), max_digits=5,
+#                                       decimal_places=2)
+#
+#    def child_instance(self):
+#        try:
+#            instance = OnlineDataAccess.objects.get(id=self.id)
+#        except ObjectDoesNotExist:
+#            try:
+#                instance = OnlineDataDelivery.objects.get(id=self.id)
+#            except ObjectDoesNotExist:
+#                try:
+#                    instance = MediaDelivery.objects.get(id=self.id)
+#                except ObjectDoesNotExist:
+#                    instance = self
+#        return instance
+#
+#    def __unicode__(self):
+#        instance = self.child_instance()
+#        return instance.__unicode__()
+
+
+#class MediaDelivery(DeliveryOption):
+#    MEDIUM_CHOICES = [(m.value, m.value) for m in constants.DeliveryMedium]
+#
+#    package_medium = models.CharField(
+#        max_length=20,
+#        choices=MEDIUM_CHOICES,
+#        blank=True
+#    )
+#    EACH_READY = "as each product is ready"
+#    ALL_READY = "once all products are ready"
+#    OTHER = "other"
+#    SHIPPING_CHOICES = (
+#        (EACH_READY, EACH_READY),
+#        (ALL_READY, ALL_READY),
+#        (OTHER, OTHER),
+#    )
+#    shipping_instructions = models.CharField(
+#        max_length=100,
+#        choices=SHIPPING_CHOICES,
+#        blank=True
+#    )
+#
+#    class Meta:
+#        verbose_name_plural = "media deliveries"
+#        unique_together = ("package_medium", "shipping_instructions")
+#
+#    def __unicode__(self):
+#        return "{}:{}:{}".format(self.__class__.__name__, self.package_medium,
+#                                 self.shipping_instructions)
+
+
+#class Option(AbstractOption):
+#
+#    def _get_choices(self):
+#        return ", ".join([c.value for c in self.choices.all()])
+#    available_choices = property(_get_choices)
+#
+#    def __unicode__(self):
+#        return self.name
+
+
+#class OptionChoice(AbstractOptionChoice):
+#    option = models.ForeignKey('Option', related_name='choices')
+
+
+#class OnlineDataAccess(DeliveryOption):
+#    protocol = models.CharField(max_length=20,
+#                                choices=DeliveryOption.PROTOCOL_CHOICES,
+#                                default=DeliveryOption.FTP,
+#                                unique=True)
+#
+#    class Meta:
+#        verbose_name_plural = 'online data accesses'
+#
+#    def __unicode__(self):
+#        return "{}:{}".format(self.__class__.__name__, self.protocol)
+
+
+#class OnlineDataDelivery(DeliveryOption):
+#    protocol = models.CharField(
+#        max_length=20,
+#        choices=DeliveryOption.PROTOCOL_CHOICES,
+#        default=DeliveryOption.FTP,
+#        unique=True
+#    )
+#
+#    class Meta:
+#        verbose_name_plural = 'online data deliveries'
+#
+#    def __unicode__(self):
+#        return "{}:{}".format(self.__class__.__name__, self.protocol)
+
 

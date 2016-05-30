@@ -12,8 +12,8 @@ from . import views
 #v1_api.register(oseoserver.api.resources.OseoFileResource())
 #v1_api.register(oseoserver.api.resources.UserResource())
 
-urlpatterns = patterns(
-    '',
+
+urlpatterns = [
     url(r'^$', views.oseo_endpoint, name='oseo_endpoint'),
     #url(r'^api/', include(v1_api.urls)),
     url('^orders/(?P<user_name>\w+)/order_(?P<order_id>\d+)/(?P<item_id>\w+)/'
@@ -23,4 +23,4 @@ urlpatterns = patterns(
     url('^orders/(?P<user_name>\w+)/order_(?P<order_id>\d+)/'
         '(?P<package_name>\w+\.?\w+)/$', views.get_ordered_packaged_files,
         name='get_ordered_packaged_files'),
-)
+]

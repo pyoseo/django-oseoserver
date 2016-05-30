@@ -20,14 +20,14 @@ class OseoFileInline(admin.StackedInline):
         return False
 
 
-class OptionChoiceInline(admin.StackedInline):
-    model = models.OptionChoice
-    extra = 1
+#class OptionChoiceInline(admin.StackedInline):
+#    model = models.OptionChoice
+#    extra = 1
 
 
-class OptionInline(admin.StackedInline):
-    model = models.Option
-    extra = 1
+#class OptionInline(admin.StackedInline):
+#    model = models.Option
+#    extra = 1
 
 
 class SelectedOptionInline(admin.StackedInline):
@@ -98,8 +98,9 @@ class SelectedSceneSelectionOptionInline(admin.StackedInline):
 
 @admin.register(models.Order)
 class OrderAdmin(admin.ModelAdmin):
-    inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,
-               ExtensionInline)
+    #inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,
+    #           ExtensionInline)
+    inlines = (ExtensionInline,)
     fieldsets = (
         (None, {
             'fields': ('order_type', 'status', 'status_notification',
@@ -212,25 +213,25 @@ class OrderItemAdmin(admin.ModelAdmin):
     link_to_order.allow_tags = True
 
 
-@admin.register(models.Option)
-class OptionAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'available_choices', 'multiple_entries',)
-    inlines = [OptionChoiceInline,]
+#@admin.register(models.Option)
+#class OptionAdmin(admin.ModelAdmin):
+#    list_display = ('id', 'name', 'available_choices', 'multiple_entries',)
+#    inlines = [OptionChoiceInline,]
 
 
-@admin.register(models.PaymentOption)
-class PaymentOptionAdmin(admin.ModelAdmin):
-    pass
+#@admin.register(models.PaymentOption)
+#class PaymentOptionAdmin(admin.ModelAdmin):
+#    pass
 
 
-@admin.register(models.SceneSelectionOption)
-class SceneSelectionOptionAdmin(admin.ModelAdmin):
-    pass
+#@admin.register(models.SceneSelectionOption)
+#class SceneSelectionOptionAdmin(admin.ModelAdmin):
+#    pass
 
 
-@admin.register(models.DeliveryOption)
-class DeliveryOptionAdmin(admin.ModelAdmin):
-    pass
+#@admin.register(models.DeliveryOption)
+#class DeliveryOptionAdmin(admin.ModelAdmin):
+#    pass
 
 
 
@@ -265,9 +266,9 @@ class SubscriptionBatchAdmin(admin.ModelAdmin):
     list_display = ('id', 'timeslot', 'collection', 'status', 'price',
                     'created_on', 'completed_on', 'updated_on',)
 
-@admin.register(models.MediaDelivery)
-class MediaDeliveryAdmin(admin.ModelAdmin):
-    list_display = ("package_medium", "shipping_instructions", "delivery_fee")
+#@admin.register(models.MediaDelivery)
+#class MediaDeliveryAdmin(admin.ModelAdmin):
+#    list_display = ("package_medium", "shipping_instructions", "delivery_fee")
 
 #@admin.register(models.OrderType)
 #class OrderTypeAdmin(admin.ModelAdmin):
@@ -297,8 +298,8 @@ class ItemProcessorAdmin(admin.ModelAdmin):
     inlines = (ProcessorParameterInline,)
 
 
-admin.site.register(models.OnlineDataAccess)
-admin.site.register(models.OnlineDataDelivery)
+#admin.site.register(models.OnlineDataAccess)
+#admin.site.register(models.OnlineDataDelivery)
 admin.site.register(models.DeliveryInformation)
 admin.site.register(models.OnlineAddress)
 admin.site.register(models.InvoiceAddress)
