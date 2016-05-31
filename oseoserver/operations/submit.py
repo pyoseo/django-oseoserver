@@ -37,6 +37,7 @@ from ..server import OseoServer
 from ..constants import DeliveryOption
 from ..constants import OrderType
 from ..constants import MASSIVE_ORDER_REFERENCE
+from ..constants import StatusNotification
 from .base import OseoOperation
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ class Submit(OseoOperation):
         """
 
         order_type = self._get_order_type(order_specification)
-        self._validate_order_type(order_type)
+        self.validate_order_type(order_type)
         spec = {
             "order_type": order_type,
             "order_item": [],
@@ -260,6 +261,19 @@ class Submit(OseoOperation):
                 }
         return address
 
+    def validate_status_notification(self, request):
+        """
+        Check that the requested status notification is supported.
+
+        :param request:
+        :return:
+        """
+
+        if request.statusNotification != StatusNotification.NONE.value:
+            raise NotImplementedError("Status notifications are "
+                                      "not supported")
+        return request.statusNotification
+
     def get_collection_id(self, item_id):
         """Determine the collection identifier for the specified item.
 
@@ -342,9 +356,10 @@ class Submit(OseoOperation):
             item["tasking_id"] = tasking_id
         item["collection"] = collection
         order_config = self._get_order_configuration(collection, order_type)
+        generic_order_config = utilities.get_generic_order_config(order_type)
         item["option"] = self._validate_requested_options(
             requested_item,
-            order_type,
+            generic_order_config,
             order_config
         )
         item["delivery_options"] = self._validate_delivery_options(
@@ -359,14 +374,14 @@ class Submit(OseoOperation):
         col_id = requested_item.productId.collectionId
         if col_id is None:
             col_id = self.get_collection_id(identifier)
-        collection = self._validate_requested_collection(col_id,
-                                                         user.oseo_group)
+        collection = self._validate_collection_id(col_id,
+                                                  user.oseo_group)
         return identifier, collection
 
     def _validate_subscription_order_item(self, requested_item, user):
         col_id = requested_item.subscriptionId.collectionId
-        collection = self._validate_requested_collection(col_id,
-                                                         user.oseo_group)
+        collection = self._validate_collection_id(col_id,
+                                                  user.oseo_group)
         return collection
 
     def _validate_tasking_order_item(self, requested_item, user):
@@ -395,7 +410,8 @@ class Submit(OseoOperation):
 
         for collection_config in settings.OSEOSERVER_COLLECTIONS:
             is_collection = collection_config.get("name") == collection
-            is_enabled = collection_config.get(order_type.value.lower(), False)
+            is_enabled = collection_config.get(order_type.value.lower(),
+                                               {}).get("enabled", False)
             if is_collection and is_enabled:
                 result = collection_config
                 break
@@ -412,16 +428,17 @@ class Submit(OseoOperation):
                     "Unable to get order configuration")
         return result
 
-    def _validate_requested_collection(self, collection_id, group):
+    def _validate_collection_id(self, collection_id):
         for collection_config in settings.OSEOSERVER_COLLECTIONS:
-            if collection_config["collection_identifier"] == collection_id:
+            if collection_config.get("collection_identifier") == collection_id:
                 result = collection_config
                 break
         else:
             raise errors.InvalidParameterValueError("collectionId")
         return result
 
-    def _validate_requested_options(self, requested_item, order_type,
+    def _validate_requested_options(self, requested_item,
+                                    generic_order_configuration,
                                     order_config):
         """
 
@@ -429,8 +446,8 @@ class Submit(OseoOperation):
         ----------
         requested_item:
             The requested item
-        order_type: oseoserver.constants.OrderType
-            The enumeration of the requested order type
+        generic_order_configuration: dict
+            The general configuration parameters of the requested order type
         order_config: dict
             Configuration parameters for the requested order type and the
             current collection
@@ -452,7 +469,9 @@ class Submit(OseoOperation):
             for value in values_tree:
                 option_name = etree.QName(value).localname
                 option_value = self._validate_selected_option(
-                    option_name, value, order_type, order_config)
+                    option_name, value, generic_order_configuration,
+                    order_config
+                )
                 option_model = order_config.options.get(name=option_name)
                 if option_model.multiple_entries:
                     if valid_options.has_key(option_name):
@@ -473,7 +492,8 @@ class Submit(OseoOperation):
                                                        order_config)
         return options
 
-    def _validate_selected_option(self, name, value, order_type, order_config):
+    def _validate_selected_option(self, name, value,
+                                  generic_order_configuration, order_config):
         """Validate a selected option choice.
 
         The validation process first tries to extract the option's value as
@@ -489,8 +509,8 @@ class Submit(OseoOperation):
             The name of the option
         value: lxml.etree.Element
             The XML element with the custom schema
-        order_type: oseoserver.constants.OrderType
-            The enumeration of the requested order type
+        generic_order_configuration: dict
+            The general configuration parameters of the requested order type
         order_config: dict
             Configuration parameters for the requested order type and the
             current collection
@@ -499,6 +519,31 @@ class Submit(OseoOperation):
         -------
 
         """
+
+        # * first we check if the provided option name is legal, according
+        #   to the order_config settings
+        # * next we check if the provided option value is legal:
+        #   we try to parse it using the item processor specified in the
+        #   generic_order_configuration settings and after that we try to
+        #   check if the parsed value is legal according to the
+        #   OSEOSERVER_OPTIONS settings
+
+        if name in order_config.get("options", []):
+            try:
+                class_path = generic_order_configuration.get("item_processor",
+                                                             None)
+                item_processor = utilities.import_class(class_path)
+                item_processor.parse
+            except AttributeError:
+                raise errors.OseoServerError(
+                    "Incorrectly configured "
+                    "item_processor: {}".format(class_path)
+                )
+            pass  # the option name is legal
+        else:
+            raise errors.InvalidParameterValueError(locator="option",
+                                                    value=name)
+
 
         try:
             option_config = [opt for opt in settings.OSEOSERVER_OPTIONS
@@ -511,24 +556,16 @@ class Submit(OseoOperation):
                 if value.text in choices:
                     result = value.text
                 else:
-                    ProcessingClass, params = utilities.get_custom_code(
-                        order_type,
-                        models.ItemProcessor.PROCESSING_PARSE_OPTION
-                    )
                     handler = utilities.import_class(ProcessingClass)
-                    parsed_value = handler.parse_option(name, value, **params)
+                    parsed_value = handler.parse_option(name, value)
                     if parsed_value in choices:
                         result = parsed_value
                     else:
                         raise errors.InvalidParameterValueError(
                             "option", value=parsed_value)
             else:
-                ProcessingClass, params = utilities.get_custom_code(
-                    order_type,
-                    models.ItemProcessor.PROCESSING_PARSE_OPTION
-                )
                 handler = utilities.import_class(ProcessingClass)
-                result = handler.parse_option(name, value, **params)
+                result = handler.parse_option(name, value)
         except KeyError:
             raise errors.InvalidParameterValueError(locator="option",
                                                     value=name)
@@ -571,8 +608,6 @@ class Submit(OseoOperation):
                     protocol = dop.onlineDataAccess.protocol
                     delivery["type"] = order_config.delivery_options.get(
                         onlinedataaccess__protocol=protocol)
-
-                    if protocol in settings.OSEOSERVER_COLLECTIONS
                     delivery["type"] = DeliveryOption.ONLINE_DATA_ACCESS
                 elif dop.onlineDataDelivery is not None:
                     protocol = dop.onlineDataAccess.protocol
@@ -639,13 +674,18 @@ class Submit(OseoOperation):
                 requested = OrderType.MASSIVE_ORDER
         return requested
 
-    def _get_generic_order_config(self, order_type):
-        return getattr(settings,
-                       "OSEOSERVER_{}".format(order_type.value.lower()),
-                       {})
 
-    def _validate_order_type(self, order_type):
-        generic_config = self._get_generic_order_config(order_type)
+    def validate_order_type(self, order_type):
+        """Assert that the input order type is allowed
+
+        Parameters
+        ----------
+        order_type: oseoserver.constants.OrderType
+            Enumeration value
+
+        """
+
+        generic_config = utilities.get_generic_order_config(order_type)
         if not generic_config.get("enabled", False):
             if order_type in (OrderType.PRODUCT_ORDER,
                               OrderType.MASSIVE_ORDER):

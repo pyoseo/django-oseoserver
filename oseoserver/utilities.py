@@ -19,7 +19,7 @@ Some utility functions for pyoseo
 import importlib
 import logging
 
-from django.conf import settings
+from django.conf import settings as django_settings
 from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
 from django.template.loader import render_to_string
@@ -27,6 +27,8 @@ from django.template.loader import render_to_string
 #from django.contrib.sites.models import Site
 from mailqueue.models import MailerMessage
 from html2text import html2text
+
+from . import settings
 
 logger = logging.getLogger('.'.join(('pyoseo', __name__)))
 
@@ -42,6 +44,27 @@ def import_class(python_path, *instance_args, **instance_kwargs):
     return instance
 
 
+def get_generic_order_config(order_type):
+    """Get the generic configuration for the input order type.
+
+    Parameters
+    ----------
+    order_type: oseoserver.constants.OrderType
+        The enumeration of the order type
+
+    Returns
+    -------
+    dict
+        The configuration parameters that are defined in the settings
+        for the selected order_type
+
+    """
+
+    return getattr(settings,
+                   "OSEOSERVER_{}".format(order_type.value.upper()),
+                   {})
+
+
 def get_custom_code(generic_order_configuration, processing_step):
     item_processor = generic_order_configuration["processor"]
     processing_class = item_processor.python_path
@@ -49,6 +72,7 @@ def get_custom_code(generic_order_configuration, processing_step):
     logger.debug('processing_class: {}'.format(processing_class))
     logger.debug('params: {}'.format(params))
     return processing_class, params
+
 
 
 def get_processor(order_type, processing_step,
@@ -170,7 +194,7 @@ def send_email(subject, message, recipients, html=False, attachments=None):
             msg = MailerMessage(
                 subject=subject,
                 to_address=address,
-                from_address=settings.EMAIL_HOST_USER,
+                from_address=django_settings.EMAIL_HOST_USER,
                 app="oseoserver"
             )
             if html:

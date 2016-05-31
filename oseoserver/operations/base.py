@@ -39,15 +39,3 @@ class OseoOperation(object):
             result = True
         return result
 
-    def validate_status_notification(self, request):
-        """
-        Check that the requested status notification is supported.
-
-        :param request:
-        :return:
-        """
-
-        if request.statusNotification != models.Order.NONE:
-            raise NotImplementedError('Status notifications are '
-                                      'not supported')
-        return request.statusNotification

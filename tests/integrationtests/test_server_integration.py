@@ -4,6 +4,8 @@ from django.contrib.auth import get_user_model
 from lxml import etree
 import pytest
 from pyxb.bundles.opengis import oseo_1_0 as oseo
+import pyxb.binding.datatypes as xsd
+from pyxb import BIND
 
 from oseoserver.server import OseoServer
 from oseoserver import errors
@@ -45,6 +47,7 @@ class TestServer(object):
         assert excinfo.value.code == "InvalidOrderIdentifier"
 
     @pytest.mark.django_db(transaction=True)
+    @pytest.mark.skip
     def test_process_request_get_status_valid_order_id(self):
         UserModel = get_user_model()
         test_user = UserModel.objects.create_user("test_user",
@@ -66,3 +69,80 @@ class TestServer(object):
             #status_notification
         )
         test_order.save()
+
+    @pytest.mark.django_db(transaction=True)
+    def test_process_request_submit_product_order_disabled(self, settings):
+        settings.OSEOSERVER_PRODUCT_ORDER = {
+            "enabled": False,
+            "automatic_approval": False,
+            "notify_creation": True,
+            "item_processor": "oseoserver.orderpreparation."
+                              "exampleorderprocessor.ExampleOrderProcessor",
+            "item_availability_days": 10,
+        }
+
+        request = oseo.Submit(
+            service="OS",
+            version="1.0.0",
+            orderSpecification=oseo.OrderSpecification(
+                orderReference="dummy reference",
+                orderRemark="dummy remark",
+                packaging="zip",
+                option=[
+                    BIND(oseo.ParameterData(encoding="XMLEncoding",
+                                            values=xsd.anyType())),
+                    BIND(
+                        oseo.ParameterData(encoding="XMLEncoding",
+                                           values=xsd.anyType())),
+                ],
+                deliveryOptions=oseo.deliveryOptions(
+                    onlineDataAccess=BIND(
+                        protocol="http"
+                    )
+                ),
+                priority="STANDARD",
+                orderType="PRODUCT_ORDER",
+                orderItem=[
+                    oseo.CommonOrderItemType(
+                        itemId="dummy item id1",
+                        productOrderOptionsId="dummy productorderoptionsid1",
+                        orderItemRemark="dumm item remark1",
+                        productId=oseo.ProductIdType(
+                            identifier="dummy catalog identifier1")
+                    ),
+                ],
+            ),
+            statusNotification="None"
+        )
+        request = _add_request_options(
+            request,
+            ("oseo:orderSpecification/oseo:option[1]/oseo:ParameterData/"
+            "oseo:values"),
+            format="fake format"
+        )
+        request_data = etree.fromstring(request.toxml(encoding="utf-8"))
+        server = OseoServer()
+        fake_user = None
+        response_element = server.process_request(request_data, fake_user)
+        root_tag = etree.QName(response_element.tag)
+        assert root_tag.localname == "Capabilities"
+        assert root_tag.namespace == constants.NAMESPACES["oseo"]
+
+
+def _add_request_options(request, xpath_expression, **options):
+    """Add options to Submit requests
+
+    This function exists in order to overcome dificulties with adding
+    arbitrary XML elements using pyxb.
+
+    """
+
+    request_element = etree.fromstring(request.toxml())
+    items = request_element.xpath(xpath_expression,
+                                  namespaces=constants.NAMESPACES)
+    for item in items:
+        for option_name, option_value in options.items():
+            option_element = etree.SubElement(item, option_name)
+            option_element.text = option_value
+    request_oseo = oseo.CreateFromDocument(etree.tostring(request_element))
+    return request_oseo

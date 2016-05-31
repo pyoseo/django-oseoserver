@@ -743,16 +743,16 @@ class SelectedDeliveryOption(models.Model):
         max_length=30,
         choices=DELIVERY_CHOICES,
         default=DeliveryOption.ONLINE_DATA_ACCESS.value,
-        help="Type of delivery that has been specified"
+        help_text="Type of delivery that has been specified"
     )
     delivery_details = models.CharField(
         max_length=255,
         null=False,
         blank=False,
-        help="A comma separated string with further details pertaining the "
-             "selected delivery type, such as the protocol to use for online "
-             "data delivery. Each delivery type expects a concrete string"
-             "format."
+        help_text="A comma separated string with further details pertaining "
+                  "the selected delivery type, such as the protocol to use "
+                  "for online data delivery. Each delivery type expects a "
+                  "concrete string format."
     )
     copies = models.PositiveSmallIntegerField(null=True, blank=True)
     annotation = models.TextField(blank=True)
