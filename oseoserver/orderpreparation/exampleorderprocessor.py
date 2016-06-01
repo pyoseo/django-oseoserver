@@ -18,7 +18,20 @@ serves as an example of the API that oseoserver expects to find on a real
 implementation.
 """
 
+from __future__ import absolute_import
 import logging
+
+from lxml import etree
+from pyxb import BIND
+from pyxb.bundles.opengis import csw_2_0_2 as csw
+from pyxb.bundles.opengis.iso19139.v20070417 import gmd
+from pyxb.bundles.opengis.iso19139.v20070417 import gco
+import requests
+
+from .. import settings
+from .. import errors
+from .. import constants
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +41,7 @@ class ExampleOrderProcessor(object):
     def __init__(self, **kwargs):
         pass
 
-    def parse_option(self, name, value, **kwargs):
+    def parse_option(self, name, value):
         """Parse an option and extract its value.
 
         This method will be called by oseoserver for each selected...
@@ -46,6 +59,56 @@ class ExampleOrderProcessor(object):
         logger.debug("parsed_value: {}".format(parsed_value))
         return parsed_value
 
+    def get_collection_id(self, item_id):
+        """Determine the collection identifier for the specified item.
+
+        This method is used when the requested order item does not provide the
+        optional 'collectionId' element. It searched all of the defined
+        catalogue endpoints and determines the collection for the
+        specified item.
+
+        The example shown here assumes that the input `item_id` is the
+        identifier for a record in a CSW catalogue.
+
+        Parameters
+        ----------
+        item_id: str
+            Identifier of an order item that belongs to the collection to
+            find
+
+        Returns
+        -------
+        str
+            Identifier of the collection
+        """
+
+        request_headers = {"Content-Type": "application/xml"}
+        ns = {"gmd": gmd.Namespace.uri(), "gco": gco.Namespace.uri(),}
+        req = csw.GetRecordById(
+            service="CSW",
+            version="2.0.2",
+            ElementSetName="summary",
+            outputSchema=ns["gmd"],
+            Id=[BIND(item_id)]
+        )
+        query_path = ("gmd:MD_Metadata/gmd:parentIdentifier/"
+                      "gco:CharacterString/text()")
+        for collection in settings.get_collections():
+            response = requests.post(
+                collection["catalogue_endpoint"],
+                data=req.toxml(),
+                headers=request_headers
+            )
+            if response.status_code == 200:
+                r = etree.fromstring(response.text.encode(constants.ENCODING))
+                id_container = r.xpath(query_path, namespaces=ns)
+                if any(id_container):
+                    collection_id = id_container[0]
+                    break
+        else:
+            raise errors.OseoServerError("Could not retrieve collection "
+                                         "id for item {!r}".format(item_id))
+        return collection_id
 
     def get_subscription_batch_identifiers(self, timeslot, collection,
                                            **kwargs):

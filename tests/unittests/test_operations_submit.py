@@ -13,7 +13,7 @@ pytestmark = pytest.mark.unit
 class TestSubmit(object):
 
     def test_creation(self):
-        op = submit.Submit()
+        submit.Submit()
 
     @pytest.mark.skip
     def test_process_order_specification(self):
@@ -40,7 +40,7 @@ class TestSubmit(object):
         with mock.patch("pyxb.bundles.opengis.oseo_1_0.SubmitOrderRequestType",
                         autospec=True) as mock_request, \
                 pytest.raises(NotImplementedError):
-            mock_request.statusNotification =status_notification
+            mock_request.statusNotification = status_notification
             op = submit.Submit()
             op.validate_status_notification(mock_request)
 
@@ -60,10 +60,6 @@ class TestSubmit(object):
         raise NotImplementedError
 
     @pytest.mark.skip
-    def test_validate_order_item(self):
-        raise NotImplementedError
-
-    @pytest.mark.skip
     def test_validate_product_order_item(self):
         raise NotImplementedError
 
@@ -74,50 +70,6 @@ class TestSubmit(object):
     @pytest.mark.skip
     def test_validate_tasking_order_item(self):
         raise NotImplementedError
-
-    @pytest.mark.parametrize(["order_type", "expected_exception"], [
-        (constants.OrderType.PRODUCT_ORDER,
-         errors.ProductOrderingNotSupportedError),
-        (constants.OrderType.MASSIVE_ORDER,
-         errors.ProductOrderingNotSupportedError),
-        (constants.OrderType.SUBSCRIPTION_ORDER,
-         errors.SubscriptionNotSupportedError),
-        (constants.OrderType.TASKING_ORDER,
-         errors.FutureProductNotSupportedError)
-    ])
-    def test_get_order_configuration_disabled(self, order_type,
-                                              expected_exception):
-        """The proper exceptions are raised when order types are disabled"""
-        fake_name = "dummy collection"
-        fake_collection_config = {
-            "name": fake_name,
-            order_type.value.lower(): {"enabled": False},
-        }
-        op = submit.Submit()
-        with mock.patch("oseoserver.operations.submit.settings",
-                        autospec=True) as mock_settings, \
-                pytest.raises(expected_exception):
-            mock_settings.OSEOSERVER_COLLECTIONS = [fake_collection_config]
-            op._get_order_configuration(fake_name, order_type)
-
-    @pytest.mark.parametrize("order_type", [
-        constants.OrderType.PRODUCT_ORDER,
-        constants.OrderType.MASSIVE_ORDER,
-        constants.OrderType.SUBSCRIPTION_ORDER,
-        constants.OrderType.TASKING_ORDER,
-    ])
-    def test_get_order_configuration_enabled(self, order_type):
-        fake_name = "dummy collection"
-        fake_collection_config = {
-            "name": fake_name,
-            order_type.value.lower(): {"enabled": True},
-        }
-        op = submit.Submit()
-        with mock.patch("oseoserver.operations.submit.settings",
-                        autospec=True) as mock_settings:
-            mock_settings.OSEOSERVER_COLLECTIONS = [fake_collection_config]
-            result = op._get_order_configuration(fake_name, order_type)
-            assert result == fake_collection_config
 
     def test_validate_collection_id_invalid(self):
         op = submit.Submit()
@@ -137,7 +89,8 @@ class TestSubmit(object):
         }
         with mock.patch("oseoserver.operations.submit.settings",
                         autospec=True) as mock_settings:
-            mock_settings.OSEOSERVER_COLLECTIONS = [fake_collection_config]
+            mock_settings.get_collections.return_value = [
+                fake_collection_config]
             result = op._validate_collection_id(fake_identifier)
             assert result == fake_collection_config
 
@@ -149,23 +102,10 @@ class TestSubmit(object):
     def test_validate_global_options(self):
         raise NotImplementedError
 
-    @pytest.mark.parametrize("order_type", [
-        constants.OrderType.PRODUCT_ORDER,
-        constants.OrderType.MASSIVE_ORDER,
-        constants.OrderType.SUBSCRIPTION_ORDER,
-        constants.OrderType.TASKING_ORDER,
-    ])
-    def test_validate_selected_option(self, order_type):
-        fake_name = "dummy name"
-        fake_value = "dummy value"
-        fake_options_config = [
-            {
-                "name": fake_name,
-            }
-        ]
-        fake_order_config = {
-            "options": [fake_name],
-        }
-        with mock.patch("oseoserver.operations.submit.settings",
-                        autospec=True) as mock_settings:
-            mock_settings.OSEOSERVER_OPTIONS = fake_options_config
+    @pytest.mark.skip
+    def test_validate_selected_option(self):
+        raise NotImplementedError
+
+    @pytest.mark.skip
+    def test_validate_order_item(self):
+        raise NotImplementedError

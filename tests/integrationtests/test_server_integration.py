@@ -12,8 +12,9 @@ from oseoserver import errors
 from oseoserver import constants
 from oseoserver import models
 
+pytestmark = pytest.mark.integration
 
-@pytest.mark.integration
+
 class TestServer(object):
 
     def test_process_request_get_capabilities(self):
@@ -71,15 +72,24 @@ class TestServer(object):
         test_order.save()
 
     @pytest.mark.django_db(transaction=True)
-    def test_process_request_submit_product_order_disabled(self, settings):
+    def test_process_request_submit_product_order(self, settings):
         settings.OSEOSERVER_PRODUCT_ORDER = {
-            "enabled": False,
+            "enabled": True,
             "automatic_approval": False,
             "notify_creation": True,
             "item_processor": "oseoserver.orderpreparation."
                               "exampleorderprocessor.ExampleOrderProcessor",
-            "item_availability_days": 10,
+            "item_availability_days": 15,
         }
+        col_name = "dummy collection"
+        col_id = "dummy collection id"
+        settings.OSEOSERVER_COLLECTIONS = [
+            {
+                "name": col_name,
+                "collection_identifier": col_id,
+                "product_order": {"enabled": True}
+            }
+        ]
 
         request = oseo.Submit(
             service="OS",
@@ -108,7 +118,9 @@ class TestServer(object):
                         productOrderOptionsId="dummy productorderoptionsid1",
                         orderItemRemark="dumm item remark1",
                         productId=oseo.ProductIdType(
-                            identifier="dummy catalog identifier1")
+                            identifier="dummy catalog identifier1",
+                            collectionId=col_id
+                        )
                     ),
                 ],
             ),

@@ -24,11 +24,12 @@ from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
 from django.template.loader import render_to_string
 
-#from django.contrib.sites.models import Site
 from mailqueue.models import MailerMessage
 from html2text import html2text
 
 from . import settings
+from . import constants
+from . import errors
 
 logger = logging.getLogger('.'.join(('pyoseo', __name__)))
 
@@ -60,9 +61,79 @@ def get_generic_order_config(order_type):
 
     """
 
-    return getattr(settings,
-                   "OSEOSERVER_{}".format(order_type.value.upper()),
-                   {})
+    setting = getattr(settings, "get_{}".format(order_type.value.lower()))
+    return setting()
+
+
+def get_order_configuration(order_type, collection):
+    """Get the configuration for the input order type and collection.
+
+    Parameters
+    ----------
+    collection: str
+        The requested collection
+    order_type: oseoserver.constants.OrderType
+        The requested order type
+
+    Returns
+    -------
+    dict
+        A dictionary with the configuration of the requested collection
+
+    """
+
+    for collection_config in settings.get_collections():
+        is_collection = collection_config.get("name") == collection
+        is_enabled = collection_config.get(order_type.value.lower(),
+                                           {}).get("enabled", False)
+        if is_collection and is_enabled:
+            result = collection_config
+            break
+    else:
+        if order_type in (constants.OrderType.PRODUCT_ORDER,
+                          constants.OrderType.MASSIVE_ORDER):
+            raise errors.ProductOrderingNotSupportedError()
+        elif order_type == constants.OrderType.SUBSCRIPTION_ORDER:
+            raise errors.SubscriptionNotSupportedError()
+        elif order_type == constants.OrderType.TASKING_ORDER:
+            raise errors.FutureProductNotSupportedError()
+        else:
+            raise errors.OseoServerError(
+                "Unable to get order configuration")
+    return result
+
+
+def get_option_configuration(option_name):
+    for option in settings.get_processing_options():
+        if option["name"] == option_name:
+            return option
+    else:
+        raise errors.OseoServerError("Invalid option {!r}".format(option_name))
+
+
+
+def validate_collection_id(collection_id):
+    print("collection_id: {}".format(collection_id))
+    for collection_config in settings.get_collections():
+        if collection_config.get("collection_identifier") == collection_id:
+            result = collection_config
+            break
+    else:
+        raise errors.InvalidParameterValueError("collectionId")
+    return result
+
+
+def validate_processing_option(name, value):
+    """Validate the input arguments against the configured options"""
+
+    for option in settings.get_processing_options():
+        if option.get("name") == name:
+            choices = option.get("choices", [])
+            if value not in choices and len(choices) > 0:
+                raise ValueError("Invalid option value: {!r}".format(value))
+            break
+    else:
+        raise ValueError("Invalid option name: {!r}".format(name))
 
 
 def get_custom_code(generic_order_configuration, processing_step):
@@ -83,8 +154,7 @@ def get_processor(order_type, processing_step,
 
 
 def send_moderation_email(order):
-    #domain = Site.objects.get_current().domain
-    domain = settings.OSEOSERVER_SITE_DOMAIN
+    domain = settings.get_site_domain()
     moderation_uri = reverse(
         'admin:oseoserver_orderpendingmoderation_changelist')
     url = "http://{}{}".format(domain, moderation_uri)

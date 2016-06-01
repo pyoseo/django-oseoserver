@@ -4,6 +4,7 @@ import pytest
 import mock
 
 from oseoserver.server import OseoServer
+from oseoserver import constants
 
 
 @pytest.mark.unit
@@ -11,7 +12,7 @@ class TestServer(object):
 
     def test_can_create(self):
         server = OseoServer()
-        assert server.ENCODING.lower() == "utf-8"
+        assert constants.ENCODING.lower() == "utf-8"
         assert server.OSEO_VERSION == "1.0.0"
 
     def test_process_request_no_submit(self):
@@ -45,7 +46,7 @@ class TestServer(object):
             fake_operation.assert_called_once_with(fake_request_instance,
                                                    fake_user)
             fake_response.toxml.assert_called_once_with(
-                encoding=server.ENCODING)
+                encoding=constants.ENCODING)
             mocked_etree.fromstring.assert_called_once_with(fake_xml)
 
 

@@ -43,7 +43,7 @@ from .utilities import _n
 
 
 COLLECTION_CHOICES = [(c["name"], c["name"]) for
-                      c in settings.OSEOSERVER_COLLECTIONS]
+                      c in settings.get_collections()]
 
 class AbstractDeliveryAddress(models.Model):
     first_name = models.CharField(max_length=50, blank=True)
@@ -389,7 +389,7 @@ class OnlineAddress(models.Model):
 
 
 class Order(CustomizableItem):
-    MAX_ORDER_ITEMS = settings.OSEOSERVER_MAX_ORDER_ITEMS
+    MAX_ORDER_ITEMS = settings.get_max_order_items()
 
     PACKAGING_CHOICES = [(v.value, v.value) for v in Packaging]
     ORDER_TYPE_CHOICES = [(t.value, t.value) for t in OrderType]

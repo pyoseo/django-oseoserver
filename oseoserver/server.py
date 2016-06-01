@@ -56,6 +56,7 @@ from . import tasks
 from . import models
 from . import errors
 from . import utilities
+from . import constants
 from .signals import signals
 
 logger = logging.getLogger(__name__)
@@ -75,8 +76,6 @@ class OseoServer(object):
     """
 
     OSEO_VERSION = "1.0.0"
-
-    ENCODING = "utf-8"
 
     OPERATION_CLASSES = {
         "GetCapabilities": "oseoserver.operations.getcapabilities."
@@ -121,7 +120,7 @@ class OseoServer(object):
                 if order_type == models.Order.PRODUCT_ORDER:
                     self.dispatch_product_order(order)
         response_element = etree.fromstring(response.toxml(
-            encoding=self.ENCODING))
+            encoding=constants.ENCODING))
         return response_element
 
     def create_exception_report(self, code, text, locator=None):
@@ -162,7 +161,7 @@ class OseoServer(object):
         """
 
         try:
-            document = etree.tostring(xml, encoding=self.ENCODING,
+            document = etree.tostring(xml, encoding=constants.ENCODING,
                                       pretty_print=True)
             oseo_request = oseo.CreateFromDocument(document)
         except (pyxb.UnrecognizedDOMRootNodeError,

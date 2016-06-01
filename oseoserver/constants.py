@@ -2,6 +2,20 @@
 
 import enum
 
+ENCODING = "utf-8"
+
+MASSIVE_ORDER_REFERENCE = 'Massive order'
+
+NAMESPACES = {
+    "soap": "http://www.w3.org/2003/05/soap-envelope",
+    "soap1.1": "http://schemas.xmlsoap.org/soap/envelope/",
+    "wsse": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-"
+            "wssecurity-secext-1.0.xsd",
+    "ows": "http://www.opengis.net/ows/2.0",
+    "oseo": "http://www.opengis.net/oseo/1.0",
+    "xml": "http://www.w3.org/XML/1998/namespace",
+}
+
 
 class OrderType(enum.Enum):
 
@@ -90,14 +104,3 @@ class Packaging(enum.Enum):
     ZIP = "zip"
 
 
-MASSIVE_ORDER_REFERENCE = 'Massive order'
-
-NAMESPACES = {
-    "soap": "http://www.w3.org/2003/05/soap-envelope",
-    "soap1.1": "http://schemas.xmlsoap.org/soap/envelope/",
-    "wsse": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-"
-            "wssecurity-secext-1.0.xsd",
-    "ows": "http://www.opengis.net/ows/2.0",
-    "oseo": "http://www.opengis.net/oseo/1.0",
-    "xml": "http://www.w3.org/XML/1998/namespace",
-}
