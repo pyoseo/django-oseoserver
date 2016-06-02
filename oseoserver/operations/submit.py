@@ -20,23 +20,19 @@ from datetime import datetime, timedelta
 import pytz
 
 from django.db import transaction
-from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
-import pyxb.bundles.opengis.csw_2_0_2 as csw
-import pyxb.bundles.opengis.iso19139.v20070417.gmd as gmd
-import pyxb.bundles.opengis.iso19139.v20070417.gco as gco
 from lxml import etree
-import requests
 
 from .. import models
 from .. import errors
 from .. import utilities
 from .. import settings
 from ..utilities import _n, _c
-from ..server import OseoServer
 from ..constants import ENCODING
 from ..constants import DeliveryOption
+from ..constants import DeliveryOptionProtocol
 from ..constants import OrderType
+from ..constants import OrderStatus
 from ..constants import MASSIVE_ORDER_REFERENCE
 from ..constants import StatusNotification
 from .base import OseoOperation
@@ -65,17 +61,17 @@ class Submit(OseoOperation):
                 raise errors.OseoError("NoApplicableCode",
                                        "Code not applicable")
             order_spec = self.process_order_specification(
-                request.orderSpecification, user)
+                request.orderSpecification)
         else:
             raise errors.ServerError("Submit with quotationId is not "
                                      "implemented")
         # TODO - raise an error if there are no delivery options on the
         # order_specification either at the order or order item levels
-        default_status = models.Order.SUBMITTED
-        additional_status_info = ("Order is awaiting approval")
+        default_status = OrderStatus.SUBMITTED
+        additional_status_info = "Order is awaiting approval"
         item_additional_status_info = ""
         if order_spec["order_type"].automatic_approval:
-            default_status = models.Order.ACCEPTED
+            default_status = OrderStatus.ACCEPTED
             additional_status_info = ("Order is placed in processing queue")
             item_additional_status_info = ("Order item has been placed in the "
                                            "processing queue")
@@ -109,11 +105,11 @@ class Submit(OseoOperation):
             "priority": order_spec["priority"],
             "status_notification": status_notification,
         }
-        if order_spec["order_type"].name == models.Order.PRODUCT_ORDER:
+        if order_spec["order_type"].name == OrderType.PRODUCT_ORDER:
             order = models.ProductOrder(**general_params)
-        elif order_spec["order_type"].name == models.Order.MASSIVE_ORDER:
+        elif order_spec["order_type"].name == OrderType.MASSIVE_ORDER:
             order = models.MassiveOrder(**general_params)
-        elif order_spec["order_type"].name == models.Order.SUBSCRIPTION_ORDER:
+        elif order_spec["order_type"].name == OrderType.SUBSCRIPTION_ORDER:
             order = models.SubscriptionOrder(**general_params)
             processor, params = utilities.get_processor(
                 order.order_type,
@@ -204,7 +200,8 @@ class Submit(OseoOperation):
                 info["online_address"] = []
                 for online_address in requested_online_info:
                     info["online_address"].append({
-                        "protocol": _c(online_address.protocol),
+                        "protocol": DeliveryOptionProtocol(
+                            _c(online_address.protocol)),
                         "server_address": _c(online_address.serverAddress),
                         "user_name": _c(online_address.userName),
                         "user_password": _c(online_address.userPassword),
@@ -221,15 +218,13 @@ class Submit(OseoOperation):
             invoice = None
         return invoice
 
-    def process_order_specification(self, order_specification, user):
+    def process_order_specification(self, order_specification):
         """Validate and extract the order specification from the request
 
         Parameters
         ----------
         order_specification: pyxb.Order
             The input order specification
-        user: django.contrib.auth.User
-            The django user that made the request
 
         Returns
         -------
@@ -507,10 +502,12 @@ class Submit(OseoOperation):
             delivery = dict()
             if dop.onlineDataAccess is not None:
                 delivery["type"] = DeliveryOption.ONLINE_DATA_ACCESS
-                delivery["protocol"] = dop.onlineDataAccess.protocol
+                delivery["protocol"] = DeliveryOptionProtocol(
+                    dop.onlineDataAccess.protocol)
             elif dop.onlineDataDelivery is not None:
                 delivery["type"] = DeliveryOption.ONLINE_DATA_DELIVERY
-                delivery["protocol"] = dop.onlineDataDelivery.protocol
+                delivery["protocol"] = DeliveryOptionProtocol(
+                    dop.onlineDataDelivery.protocol)
             else:
                 delivery["type"] = DeliveryOption.MEDIA_DELIVERY
                 delivery["medium"] = dop.mediaDelivery.packageMedium
@@ -522,8 +519,8 @@ class Submit(OseoOperation):
             delivery["special_instructions"] = _c(dop.specialInstructions)
         return delivery
 
-    def _validate_global_delivery_options(self, requested_order_spec,
-                                          ordered_order_configs):
+    def _validate_global_delivery_options(self, order_specification,
+                                          specific_order_configurations):
         """Validate global order delivery options.
 
         Oseoserver only accepts global options that are valid for each of the
@@ -531,23 +528,56 @@ class Submit(OseoOperation):
         options must be valid according to all of order configurations of the
         ordered collections.
 
-        :param requested_order_spec:
-        :param ordered_order_configs:
-        :return:
+        Parameters
+        ----------
+        order_specification: oseo.OrderSpecification
+            The orderSpecification instance of the order being processed
+        specific_order_configurations
+
+        Returns
+        -------
+
         """
 
-        for order_config in ordered_order_configs:
-            delivery_options = self._validate_delivery_options(
-                requested_order_spec, order_config)
+        delivery_options = {}
+        for order_config in specific_order_configurations:
+            delivery_options.update(
+                self._validate_delivery_options(
+                    order_specification.deliveryOptions,
+                    order_config
+            ))
         return delivery_options
 
-    def _validate_global_options(self, requested_order_spec,
+    def _validate_global_options(self, order_specification,
                                  order_type,
-                                 ordered_order_configs):
-        for order_config in ordered_order_configs:
-            options = self._validate_requested_options(requested_order_spec,
-                                                       order_type,
-                                                       order_config)
+                                 specific_order_configurations):
+        """Validate global order processing options.
+
+        Oseoserver only accepts global options that are valid for each of the
+        order items contained in the order. As such, the requested delivery
+        options must be valid according to all of order configurations of the
+        ordered collections.
+
+        Parameters
+        ----------
+        order_specification: oseo.OrderSpecification
+            The orderSpecification instance of the order being processed
+        order_type: constants.OrderType
+            Enumeration instance with the order type
+        specific_order_configurations
+
+        Returns
+        -------
+
+        """
+        options = {}
+        for order_config in specific_order_configurations:
+            options.update(
+                self._validate_requested_options(
+                order_specification.option,
+                order_type,
+                order_config
+            ))
         return options
 
     def _validate_packaging(self, requested_packaging):

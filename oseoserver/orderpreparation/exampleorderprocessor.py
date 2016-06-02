@@ -46,17 +46,22 @@ class ExampleOrderProcessor(object):
 
         This method will be called by oseoserver for each selected...
 
-        :param name:
-        :param value:
-        :return:
+        The example shown here simply extracts the text content of the input
+        `value`
+
+        Parameters
+        ----------
+        name: str
+            The name or the option being parsed
+        value: lxml.etree._Element
+
+        Returns
+        -------
+        str
+            The parsed value
         """
 
-        logger.debug("locals: {}".format(locals()))
-        #parsed_value = value.text
-        parsed_value = value
-        logger.debug("name: {}".format(name))
-        logger.debug("value: {}".format(value))
-        logger.debug("parsed_value: {}".format(parsed_value))
+        parsed_value = value.text
         return parsed_value
 
     def get_collection_id(self, item_id):

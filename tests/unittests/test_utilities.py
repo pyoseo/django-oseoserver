@@ -105,3 +105,43 @@ def test_get_order_configuration_enabled(order_type):
         mock_settings.get_collections.return_value = [fake_collection_config]
         result = utilities.get_order_configuration(order_type, fake_collection)
     assert result == fake_collection_config
+
+
+def test_get_option_configuration_invalid_option():
+    fake_name = "fake_option"
+    with mock.patch("oseoserver.utilities.settings",
+                    autospec=True) as mock_settings, \
+            pytest.raises(errors.OseoServerError):
+        mock_settings.get_processing_options.return_value = []
+        utilities.get_option_configuration(fake_name)
+
+
+def test_get_option_configuration_valid_option():
+    fake_name = "fake_option"
+    fake_option_config = {"name": fake_name}
+    with mock.patch("oseoserver.utilities.settings",
+                    autospec=True) as mock_settings:
+        mock_settings.get_processing_options.return_value = [
+            fake_option_config]
+        result = utilities.get_option_configuration(fake_name)
+        assert result == fake_option_config
+
+
+def test_validate_collection_id_invalid_id():
+    fake_id = "fake collection id"
+    with mock.patch("oseoserver.utilities.settings",
+                    autospec=True) as mock_settings, \
+            pytest.raises(errors.InvalidParameterValueError):
+        mock_settings.get_collections.return_value = []
+        utilities.validate_collection_id(fake_id)
+
+
+def test_validate_collection_id_valid_id():
+    fake_id = "fake collection id"
+    fake_collection_config = {"collection_identifier": fake_id}
+    with mock.patch("oseoserver.utilities.settings",
+                    autospec=True) as mock_settings:
+        mock_settings.get_collections.return_value = [fake_collection_config]
+        result = utilities.validate_collection_id(fake_id)
+        assert result == fake_collection_config
+
