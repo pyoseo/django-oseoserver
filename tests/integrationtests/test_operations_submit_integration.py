@@ -157,6 +157,7 @@ class TestSubmitOperation(object):
             }
         ]
         settings.OSEOSERVER_PRODUCT_ORDER = {
+            "enabled": True,
             "item_processor": "oseoserver.orderpreparation."
                               "exampleorderprocessor.ExampleOrderProcessor"
         }
@@ -168,6 +169,7 @@ class TestSubmitOperation(object):
                 "collection_identifier": col_id,
                 "product_order": {
                     "enabled": True,
+                    "options": [option_name],
                     "online_data_access_options": [online_data_access_option]
                 }
             }
@@ -217,12 +219,8 @@ def _add_order_specification_options(order_spec, xpath_expression, **options):
     arbitrary XML elements using pyxb.
 
     """
-    order_spec_pyxb_element = basis.element(
-        namespace.ExpandedName(oseo.Namespace, "orderSpecification"),
-        oseo.orderSpecification
-    )
-    order_spec._setElement(order_spec_pyxb_element)
-    order_spec_element = etree.fromstring(order_spec.toxml())
+    order_spec_element = etree.fromstring(order_spec.toxml(
+        element_name="ns1:orderSpecification"))
     items = order_spec_element.xpath(xpath_expression,
                                      namespaces=constants.NAMESPACES)
     for item in items:

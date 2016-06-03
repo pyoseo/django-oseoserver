@@ -2,6 +2,7 @@
 
 import pytest
 import mock
+from mock import DEFAULT
 
 from oseoserver import constants
 from oseoserver import errors
@@ -32,37 +33,27 @@ def test_get_generic_order_config(order_type, fake_config):
         assert  result == fake_config
 
 
-@pytest.mark.parametrize(["option_name", "option_value", "mocked_config"], [
-    ("fake_name", "fake_value", {}),
-    ("fake_name", "fake_value", {"name": "fake"}),
-    ("fake_name", "fake_value", {
-        "name": "fake_name",
-        "choices": ["choice1"]
-    }),
-
-])
-def test_validate_processing_option_invalid_option(option_name, option_value,
-                                                   mocked_config):
-    with mock.patch("oseoserver.utilities.settings",
-                    autospec=True) as mock_settings:
-        mock_settings.get_processing_options.return_value = [mocked_config]
-        with pytest.raises(ValueError):
-            utilities.validate_processing_option(option_name, option_value)
-
-
-@pytest.mark.parametrize(["option_name", "option_value", "mocked_config"], [
-    ("fake_name", "fake_value", {"name": "fake_name"}),
-    ("fake_name", "fake_value", {
-        "name": "fake_name",
-        "choices": ["fake_value"]
-    }),
-])
-def test_validate_processing_option_valid_option(option_name, option_value,
-                                                 mocked_config):
-    with mock.patch("oseoserver.utilities.settings",
-                    autospec=True) as mock_settings:
-        mock_settings.get_processing_options.return_value = [mocked_config]
-        utilities.validate_processing_option(option_name, option_value)
+def test_validate_processing_option_no_choices():
+    fake_option_name = "dummy name"
+    fake_parsed_value = "dummy value"
+    order_type = constants.OrderType.PRODUCT_ORDER
+    with mock.patch.multiple("oseoserver.utilities",
+                             get_order_configuration=DEFAULT,
+                             get_generic_order_config=DEFAULT,
+                             import_class=DEFAULT) as mock_util, \
+            mock.patch("oseoserver.settings.get_processing_options",
+                       autospec=True) as mock_get_options:
+        mock_util["get_order_configuration"].return_value = {
+            "product_order": {"options": [fake_option_name]}
+        }
+        mock_util["get_generic_order_config"].return_value = {
+            "item_processor": "dummy"}
+        mock_util["import_class"].return_value.parse_option.return_value = (
+            fake_parsed_value)
+        mock_get_options.return_value = [{"name": fake_option_name}]
+        result = utilities.validate_processing_option(
+            fake_option_name, fake_parsed_value, order_type, "dummy")
+        assert result == fake_parsed_value
 
 
 @pytest.mark.parametrize(["order_type", "expected_exception"], [

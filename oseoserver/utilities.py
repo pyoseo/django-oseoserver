@@ -123,17 +123,41 @@ def validate_collection_id(collection_id):
     return result
 
 
-def validate_processing_option(name, value):
+def validate_processing_option(name, value, order_type, collection_name):
     """Validate the input arguments against the configured options"""
 
+    # 1. can this option be used with the current collection and order_type?
+    collection_config = get_order_configuration(order_type, collection_name)
+    allowed_options = collection_config[order_type.value.lower()].get(
+        "options")
+    if name not in allowed_options:
+        raise errors.InvalidParameterValueError("option", value=name)
+
+    # 2. Lets get the parsed value for the option using the external
+    #    item_processor
+    item_processor_class_path = get_generic_order_config(
+        order_type)["item_processor"]
+    try:
+        item_processor = import_class(item_processor_class_path)
+        parsed_value = item_processor.parse_option(name, value)
+    except AttributeError:
+        raise errors.OseoServerError(
+            "Incorrectly configured "
+            "item_processor: {}".format(item_processor_class_path)
+        )
+
+    # 3. is the parsed value legal?
+    print("parsed_value: {}".format(parsed_value))
     for option in settings.get_processing_options():
         if option.get("name") == name:
             choices = option.get("choices", [])
-            if value not in choices and len(choices) > 0:
-                raise ValueError("Invalid option value: {!r}".format(value))
+            if parsed_value not in choices and len(choices) > 0:
+                raise errors.InvalidParameterValueError("option",
+                                                        value=parsed_value)
             break
     else:
-        raise ValueError("Invalid option name: {!r}".format(name))
+        raise errors.InvalidParameterValueError("option", value=parsed_value)
+    return parsed_value
 
 
 def get_custom_code(generic_order_configuration, processing_step):
@@ -165,7 +189,7 @@ def send_moderation_email(order):
     }
     msg = render_to_string(template, context)
     subject = "Copernicus Global Land Service - {} {} awaits " \
-              "moderation".format(order.order_type.name, order.id)
+              "moderation".format(order.order_type, order.id)
     recipients = User.objects.filter(is_staff=True).exclude(email="")
     send_email(subject, msg, recipients, html=True)
 
@@ -254,12 +278,7 @@ def send_product_batch_available_email(batch):
 def send_email(subject, message, recipients, html=False, attachments=None):
     already_emailed = []
     for recipient in recipients:
-        try:
-            # recipient is a User
-            address = recipient.email
-        except AttributeError:
-            # recipient is an OseoUser
-            address = recipient.user.email
+        address = recipient.email
         if address != "" and address not in already_emailed:
             msg = MailerMessage(
                 subject=subject,

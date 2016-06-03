@@ -74,9 +74,10 @@ def unwrap_request(request_element):
 
     soap_version = get_soap_version(request_element)
     if soap_version is not None:
-        body_path = "{}:Body/*".format(soap_version)
+        soap_ns_prefix = "soap" if soap_version == "1.2" else "soap1.1"
+        body_path = "{}:Body/*".format(soap_ns_prefix)
         request_data = request_element.xpath(body_path.format(soap_version),
-                                             namespaces=NAMESPACES)
+                                             namespaces=NAMESPACES)[0]
         user, password, password_attributes = usernametoken.get_details(
             request_element, soap_version)
     else:

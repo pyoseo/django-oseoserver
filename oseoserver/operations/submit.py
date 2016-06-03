@@ -16,7 +16,7 @@
 
 from __future__ import absolute_import
 import logging
-from datetime import datetime, timedelta
+import datetime as dt
 import pytz
 
 from django.db import transaction
@@ -33,6 +33,7 @@ from ..constants import DeliveryOption
 from ..constants import DeliveryOptionProtocol
 from ..constants import OrderType
 from ..constants import OrderStatus
+from ..constants import Priority
 from ..constants import MASSIVE_ORDER_REFERENCE
 from ..constants import StatusNotification
 from .base import OseoOperation
@@ -46,12 +47,18 @@ class Submit(OseoOperation):
     def __call__(self, request, user):
         """Implements the OSEO Submit operation.
 
-        :arg request: The instance with the request parameters
-        :type request: pyxb.bundles.opengis.raw.oseo.GetStatusRequestType
-        :arg user: User making the request
-        :type user: oseoserver.models.OseoUser
-        :return: The XML response object
-        :rtype: str
+        Parameters
+        ----------
+        request: oseo.Submit
+            The incoming request
+        user: django.contrib.auth.User
+            The django user that placed the request
+
+        Returns
+        -------
+        str
+            The XML response
+
         """
 
         status_notification = self.validate_status_notification(request)
@@ -67,92 +74,128 @@ class Submit(OseoOperation):
                                      "implemented")
         # TODO - raise an error if there are no delivery options on the
         # order_specification either at the order or order item levels
-        default_status = OrderStatus.SUBMITTED
-        additional_status_info = "Order is awaiting approval"
-        item_additional_status_info = ""
-        if order_spec["order_type"].automatic_approval:
-            default_status = OrderStatus.ACCEPTED
-            additional_status_info = ("Order is placed in processing queue")
-            item_additional_status_info = ("Order item has been placed in the "
-                                           "processing queue")
-        order = self.create_order(order_spec, user, status_notification,
-                                  default_status, additional_status_info,
-                                  item_additional_status_info)
+        order = self.create_order(
+            order_type=order_spec["order_type"],
+            delivery_options=order_spec["delivery_options"],
+            order_items=order_spec["order_item"],
+            user=user,
+            status_notification=status_notification,
+            priority=order_spec["priority"],
+            order_reference=order_spec["order_reference"],
+            order_remark=order_spec["order_remark"],
+            delivery_information=order_spec["delivery_information"],
+            options=order_spec["option"],
+            invoice_address=order_spec["invoice_address"],
+            packaging=order_spec["packaging"],
+            extension=order_spec["extension"]
+        )
         response = oseo.SubmitAck(status='success')
         response.orderId = str(order.id)
         response.orderReference = _n(order.reference)
         return response, order
 
-    def create_order(self, order_spec, user, status_notification, status,
-                     additional_status_info, item_additional_status_info=""):
-        """Persist the order specification in the database.
+    def create_order(self, order_type, delivery_options, order_items,
+                     user, status_notification,
+                     priority="", order_reference=None,
+                     order_remark=None, delivery_information=None,
+                     options=None, invoice_address=None,
+                     packaging=None, extension=None):
+        """Persist the already parsed order specification in the database.
 
-        :param order_spec:
-        :param user:
-        :param status_notification:
-        :param status:
-        :return:
+        Parameters
+        ----------
+        order_type: constants.OrderType
+            Enumeration object with the type of order being created
+        delivery_options: dict
+            A mapping with the parsed delivery options
+        order_items: list
+            A list of dictionaries that hold the specification for the parsed
+            order items that are being requested in the order
+        user: django.contrib.auth.models.User
+            The django user that placed the order
+        status_notification: constants.StatusNotification
+            Enumeration object with the type of status notification to use
+        priority: constants.Priority
+            Enumeration object with the priority of the order
+        order_reference: str
+            A textual reference for the order
+        order_remark: str
+            A textual remark concerning the order
+        delivery_information
+        options
+        invoice_address
+        packaging
+        extension
+
+        Returns
+        -------
+        ProductOrder or MassiveOrder or SubscriptionOrder or TaskingOrder
+            The corresponding django model class that was created
+
         """
 
-        general_params = {
-            "order_type": order_spec["order_type"],
-            "status": status,
-            "additional_status_info": additional_status_info,
-            "remark": order_spec["order_remark"],
-            "user": user,
-            "reference": order_spec["order_reference"],
-            "packaging": order_spec["packaging"],
-            "priority": order_spec["priority"],
-            "status_notification": status_notification,
-        }
-        if order_spec["order_type"].name == OrderType.PRODUCT_ORDER:
-            order = models.ProductOrder(**general_params)
-        elif order_spec["order_type"].name == OrderType.MASSIVE_ORDER:
-            order = models.MassiveOrder(**general_params)
-        elif order_spec["order_type"].name == OrderType.SUBSCRIPTION_ORDER:
-            order = models.SubscriptionOrder(**general_params)
-            processor, params = utilities.get_processor(
-                order.order_type,
-                models.ItemProcessor.PROCESSING_PROCESS_ITEM,
-                logger_type="pyoseo"
-            )
-            begin, end = processor.get_subscription_duration(order_spec)
-            now = datetime.now(pytz.utc)
-            order.begin_on = begin or now
-            order.end_on = end or now + timedelta(days=365 * 10)  # ten years
+        generic_order_config = utilities.get_generic_order_config(
+            order_type)
+        if generic_order_config.get("automatic_approval", False):
+            default_status = OrderStatus.ACCEPTED
+            additional_status_info = ("Order is placed in processing queue")
+            item_additional_status_info = ("Order item has been placed in the "
+                                           "processing queue")
         else:
-            order = models.TaskingOrder(**general_params)
+            default_status = OrderStatus.SUBMITTED
+            additional_status_info = "Order is awaiting approval"
+            item_additional_status_info = ""
+        OrderModel = {
+            OrderType.PRODUCT_ORDER: models.ProductOrder,
+            OrderType.MASSIVE_ORDER: models.MassiveOrder,
+            OrderType.SUBSCRIPTION_ORDER: models.SubscriptionOrder,
+            OrderType.TASKING_ORDER: models.TaskingOrder,
+        }.get(order_type)
+        order = OrderModel(
+            status=default_status,
+            additional_status_info=additional_status_info,
+            mission_specific_status_info="",
+            remark=order_remark,
+            user=user,
+            order_type=order_type.value,
+            reference=order_reference,
+            packaging=packaging,
+            priority=priority.value,
+            status_notification=status_notification.value
+        )
+        if order_type == OrderType.SUBSCRIPTION_ORDER:
+            # get begin and end dates for the subscription
+            item_processor = utilities.import_class(
+                generic_order_config["item_processor"])
+            begin, end = item_processor.get_subscription_duration(options)
+            now = dt.datetime.now(pytz.utc)
+            order.begin_on = begin or now
+            order.end_on = end or now + dt.timedelta(days=365 * 10)  # ten years
         order.save()
-        if order_spec["invoice_address"] is not None:
-            invoice = models.InvoiceAddress()
-            order.invoice_address = invoice
-        # TODO Implement the code for when orders do have invoice address
-        if order_spec["delivery_information"] is not None:
-            delivery_info = models.DeliveryInformation()
-            order.delivery_information = delivery_info
-        # TODO Implement the code for when orders do have delivery information
-        for k, v in order_spec["option"].iteritems():
-            option = models.Option.objects.get(name=k)
-            order.selected_options.add(models.SelectedOption(option=option,
-                                                             value=v))
-        delivery = order_spec["delivery_options"]
-        if delivery is not None:
-            copies = 1 if delivery["copies"] is None else delivery["copies"]
-            sdo = models.SelectedDeliveryOption(
-                customizable_item=order,
-                annotation=delivery["annotation"],
-                copies=copies,
-                special_instructions=delivery["special_instructions"],
-                option=delivery["type"]
+        # implement InvoiceAddress
+        # implement DeliveryInformation
+        for option_name, option_value in options.items():
+            order.selected_options.add(
+                models.SelectedOption(option=option_name, value=option_value),
+                bulk=False
             )
-            sdo.save()
+
+        sdo = models.SelectedDeliveryOption(
+            customizable_item=order,
+            annotation=delivery_options["annotation"],
+            copies=delivery_options["copies"],
+            special_instructions=delivery_options["special_instructions"],
+            delivery_type=delivery_options["type"].value,
+            delivery_details=delivery_options["protocol"].value
+        )
+        sdo.save()
         order.save()
-        batch = order.create_batch(
+        order.create_batch(
             order.status,
             item_additional_status_info,
-            *order_spec["order_item"]
+            *order_items
         )
-        for ext in order_spec["extension"]:
+        for ext in extension or []:
             e = models.Extension(item=order, text=ext)
             e.save()
         return order
@@ -243,27 +286,21 @@ class Submit(OseoOperation):
             spec["order_item"].append(
                 self.validate_order_item(order_item, order_type)
             )
-        spec["requested_order_configurations"] = []
-        for collection in set([i["collection"] for i in spec["order_item"]]):
-            order_config = self._get_order_configuration(
-                collection, order_type)
-            spec["requested_order_configurations"].append(order_config)
         spec["order_reference"] = _c(order_specification.orderReference)
         spec["order_remark"] = _c(order_specification.orderRemark)
         spec["packaging"] = self._validate_packaging(
             order_specification.packaging)
-        spec["priority"] = _c(order_specification.priority)
+        spec["priority"] = Priority(_c(order_specification.priority))
         spec["delivery_information"] = self.get_delivery_information(
             order_specification.deliveryInformation)
         spec["invoice_address"] = self.get_invoice_address(
             order_specification.invoiceAddress)
-        spec["option"] = self._validate_global_options(
-            order_specification,
-            order_type,
-            spec["requested_order_configurations"]
-        )
+        requested_collections = [i["collection"] for i in spec["order_item"]]
+        spec["option"] = self._validate_global_options(order_specification,
+                                                       order_type,
+                                                       requested_collections)
         spec["delivery_options"] = self._validate_global_delivery_options(
-            order_specification, spec["requested_order_configurations"])
+            order_specification, order_type, requested_collections)
         spec["extension"] = [e for e in order_specification.extension]
         return spec
 
@@ -302,8 +339,8 @@ class Submit(OseoOperation):
         item["collection"] = collection_config["name"]
         item["option"] = self._validate_requested_options(
             requested_item.option,
-            generic_order_config,
-            specific_order_config
+            order_type,
+            collection_config["name"]
         )
         item["delivery_options"] = self._validate_delivery_options(
             requested_item.deliveryOptions, specific_order_config)
@@ -379,7 +416,7 @@ class Submit(OseoOperation):
         if request.statusNotification != StatusNotification.NONE.value:
             raise NotImplementedError("Status notifications are "
                                       "not supported")
-        return request.statusNotification
+        return StatusNotification(request.statusNotification)
 
     def _get_delivery_address(self, delivery_address_type):
         address = {
@@ -401,42 +438,6 @@ class Submit(OseoOperation):
                 "post_box": _c(postal_address.postBox),
                 }
         return address
-
-    def _get_order_configuration(self, collection, order_type):
-        """Get the configuration for the requested order type and collection.
-
-        Parameters
-        ----------
-        collection: str
-            The requested collection
-        order_type: oseoserver.constants.OrderType
-            The requested order type
-
-        Returns
-        -------
-        dict
-            A dictionary with the configuration of the requested collection
-
-        """
-        for collection_config in settings.get_collections():
-            is_collection = collection_config.get("name") == collection
-            is_enabled = collection_config.get(order_type.value.lower(),
-                                               {}).get("enabled", False)
-            if is_collection and is_enabled:
-                result = collection_config
-                break
-        else:
-            if order_type in (OrderType.PRODUCT_ORDER,
-                              OrderType.MASSIVE_ORDER):
-                raise errors.ProductOrderingNotSupportedError()
-            elif order_type == OrderType.SUBSCRIPTION_ORDER:
-                raise errors.SubscriptionNotSupportedError()
-            elif order_type == OrderType.TASKING_ORDER:
-                raise errors.FutureProductNotSupportedError()
-            else:
-                raise errors.OseoServerError(
-                    "Unable to get order configuration")
-        return result
 
     def _get_order_type(self, order_specification):
         """Return the order type for the input order specification.
@@ -513,14 +514,13 @@ class Submit(OseoOperation):
                 delivery["medium"] = dop.mediaDelivery.packageMedium
                 delivery["shipping_instructions"] = (
                     dop.mediaDelivery.shippingInstructions)
-            copies = dop.numberOfCopies
-            delivery["copies"] = int(copies) if copies is not None else copies
+            delivery["copies"] = dop.numberOfCopies or 1
             delivery["annotation"] = _c(dop.productAnnotation)
             delivery["special_instructions"] = _c(dop.specialInstructions)
         return delivery
 
     def _validate_global_delivery_options(self, order_specification,
-                                          specific_order_configurations):
+                                          order_type, collections):
         """Validate global order delivery options.
 
         Oseoserver only accepts global options that are valid for each of the
@@ -532,7 +532,11 @@ class Submit(OseoOperation):
         ----------
         order_specification: oseo.OrderSpecification
             The orderSpecification instance of the order being processed
-        specific_order_configurations
+        order_type: constants.OrderType
+            Enumeration instance with the order type
+        collections: list
+            Names of the collections that are being requested throughout the
+            order items of the incoming order
 
         Returns
         -------
@@ -540,17 +544,18 @@ class Submit(OseoOperation):
         """
 
         delivery_options = {}
-        for order_config in specific_order_configurations:
+        for collection_name in collections:
+            config = utilities.get_order_configuration(order_type,
+                                                       collection_name)
             delivery_options.update(
                 self._validate_delivery_options(
                     order_specification.deliveryOptions,
-                    order_config
+                    config
             ))
         return delivery_options
 
     def _validate_global_options(self, order_specification,
-                                 order_type,
-                                 specific_order_configurations):
+                                 order_type, collections):
         """Validate global order processing options.
 
         Oseoserver only accepts global options that are valid for each of the
@@ -564,19 +569,21 @@ class Submit(OseoOperation):
             The orderSpecification instance of the order being processed
         order_type: constants.OrderType
             Enumeration instance with the order type
-        specific_order_configurations
+        collections: list
+            Names of the collections that are being requested throughout the
+            order items of the incoming order
 
         Returns
         -------
 
         """
+
         options = {}
-        for order_config in specific_order_configurations:
+        for collection_name in collections:
             options.update(
                 self._validate_requested_options(
                 order_specification.option,
-                order_type,
-                order_config
+                order_type, collection_name
             ))
         return options
 
@@ -587,99 +594,17 @@ class Submit(OseoOperation):
             raise errors.InvalidParameterValueError("packaging")
         return packaging
 
-    def _validate_requested_options(self, requested_options,
-                                    generic_order_configuration,
-                                    order_config):
-        """
-
-        Parameters
-        ----------
-        requested_options:
-            The requested item's processing options
-        generic_order_configuration: dict
-            The general configuration parameters of the requested order type
-        order_config: dict
-            Configuration parameters for the requested order type and the
-            current collection
-
-        Returns
-        -------
-        dict
-            The validated options
-
-        """
-
-        valid_options = dict()
+    def _validate_requested_options(self, requested_options, order_type,
+                                    collection_name):
+        validated_options = {}
         for option in requested_options:
             values = option.ParameterData.values
-            encoding = option.ParameterData.encoding
             # since values is an xsd:anyType, we will not do schema
             # validation on it
             values_tree = etree.fromstring(values.toxml(ENCODING))
             for value in values_tree:
                 option_name = etree.QName(value).localname
-                option_value = self._validate_selected_option(
-                    option_name, value, generic_order_configuration,
-                    order_config
-                )
-                option_config = utilities.get_option_configuration(option_name)
-                if option_config.get("multiple_entries", False):
-                    if valid_options.has_key(option_name):
-                        valid_options[option_name] = " ".join(
-                            (valid_options[option_name], option_value))
-                    else:
-                        valid_options[option_name] = option_value
-                else:
-                    valid_options[option_name] = option_value
-        return valid_options
-
-    def _validate_selected_option(self, name, value,
-                                  generic_order_configuration, order_config):
-        """Validate a selected option choice.
-
-        The validation process first tries to extract the option's value as
-        a simple text and matches it with the available choices for the
-        option. If a match cannot be made, the collection's custom processing
-        class is instantiated and used to parse the option into a text based
-        format. This parsed value is again matched against the available
-        choices.
-
-        Parameters
-        ----------
-        name: str
-            The name of the option
-        value: lxml.etree.Element
-            The XML element with the custom schema
-        generic_order_configuration: dict
-            The general configuration parameters of the requested order type
-        order_config: dict
-            Configuration parameters for the requested order type and the
-            current collection
-
-        Returns
-        -------
-        str
-            The validated option value
-
-        """
-
-        if name in order_config.get("options", []):
-            parsed_value = value
-            class_path = generic_order_configuration.get("item_processor",
-                                                         None)
-            try:
-                item_processor = utilities.import_class(class_path)
-                parsed_value = item_processor.parse_option(name, value)
-                utilities.validate_processing_option(name, parsed_value)
-            except AttributeError:
-                raise errors.OseoServerError(
-                    "Incorrectly configured "
-                    "item_processor: {}".format(class_path)
-                )
-            except ValueError:
-                raise errors.InvalidParameterValueError("option",
-                                                        value=parsed_value)
-        else:
-            raise errors.InvalidParameterValueError(locator="option",
-                                                    value=name)
-        return parsed_value
+                parsed_value = utilities.validate_processing_option(
+                    option_name, value, order_type, collection_name)
+                validated_options[option_name] = parsed_value
+        return validated_options

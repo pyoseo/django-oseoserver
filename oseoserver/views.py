@@ -13,13 +13,11 @@ from django.views.decorators.csrf import csrf_exempt
 from lxml import etree
 from sendfile import sendfile
 
-import oseoserver.soap
-from .constants import NAMESPACES
+from .constants import ENCODING
 from . import errors
 from . import models
 from . import utilities
 from . import soap
-from .auth import usernametoken
 from .server import OseoServer
 from .signals import signals
 
@@ -77,7 +75,7 @@ def oseo_endpoint(request):
                 )
             except errors.ServerError:
                 raise
-            serialized = etree.tostring(response, encoding=server.ENCODING,
+            serialized = etree.tostring(response, encoding=ENCODING,
                                         pretty_print=True)
             django_response = HttpResponse(serialized)
             django_response.status_code = status_code

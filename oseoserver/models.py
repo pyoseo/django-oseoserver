@@ -427,14 +427,13 @@ class Order(CustomizableItem):
         return ', '.join([str(b.id) for b in self.batches.all()])
     show_batches.short_description = 'available batches'
 
-
     def create_batch(self, item_status, additional_status_info,
-                     *order_item_spec):
+                     *order_items_spec):
         batch = Batch()
         batch.save()
-        for oi in order_item_spec:
+        for item_spec in order_items_spec:
             batch.create_order_item(item_status, additional_status_info,
-                                    oi)
+                                    item_spec)
         self.batches.add(batch)
         return batch
 
@@ -774,124 +773,3 @@ class SubscriptionBatch(Batch):
 
     def __unicode__(self):
         return str("{}({})".format(self.__class__.__name__, self.id))
-
-
-#class AbstractOption(models.Model):
-#    name = models.CharField(max_length=100)
-#    description = models.CharField(max_length=255, blank=True)
-#    multiple_entries = models.BooleanField(
-#        default=False,
-#        help_text="Can this option have multiple selections?"
-#    )
-#
-#    class Meta:
-#        abstract = True
-
-
-#class AbstractOptionChoice(models.Model):
-#    value = models.CharField(max_length=255, help_text="Value for this option")
-#
-#    class Meta:
-#        abstract = True
-#
-#    def __unicode__(self):
-#        return self.value
-
-
-#class DeliveryOption(models.Model):
-#    PROTOCOL_CHOICES = [(protocol.value, protocol.value) for protocol in
-#                      constants.DeliveryOptionProtocol]
-#    delivery_fee = models.DecimalField(default=Decimal(0), max_digits=5,
-#                                       decimal_places=2)
-#
-#    def child_instance(self):
-#        try:
-#            instance = OnlineDataAccess.objects.get(id=self.id)
-#        except ObjectDoesNotExist:
-#            try:
-#                instance = OnlineDataDelivery.objects.get(id=self.id)
-#            except ObjectDoesNotExist:
-#                try:
-#                    instance = MediaDelivery.objects.get(id=self.id)
-#                except ObjectDoesNotExist:
-#                    instance = self
-#        return instance
-#
-#    def __unicode__(self):
-#        instance = self.child_instance()
-#        return instance.__unicode__()
-
-
-#class MediaDelivery(DeliveryOption):
-#    MEDIUM_CHOICES = [(m.value, m.value) for m in constants.DeliveryMedium]
-#
-#    package_medium = models.CharField(
-#        max_length=20,
-#        choices=MEDIUM_CHOICES,
-#        blank=True
-#    )
-#    EACH_READY = "as each product is ready"
-#    ALL_READY = "once all products are ready"
-#    OTHER = "other"
-#    SHIPPING_CHOICES = (
-#        (EACH_READY, EACH_READY),
-#        (ALL_READY, ALL_READY),
-#        (OTHER, OTHER),
-#    )
-#    shipping_instructions = models.CharField(
-#        max_length=100,
-#        choices=SHIPPING_CHOICES,
-#        blank=True
-#    )
-#
-#    class Meta:
-#        verbose_name_plural = "media deliveries"
-#        unique_together = ("package_medium", "shipping_instructions")
-#
-#    def __unicode__(self):
-#        return "{}:{}:{}".format(self.__class__.__name__, self.package_medium,
-#                                 self.shipping_instructions)
-
-
-#class Option(AbstractOption):
-#
-#    def _get_choices(self):
-#        return ", ".join([c.value for c in self.choices.all()])
-#    available_choices = property(_get_choices)
-#
-#    def __unicode__(self):
-#        return self.name
-
-
-#class OptionChoice(AbstractOptionChoice):
-#    option = models.ForeignKey('Option', related_name='choices')
-
-
-#class OnlineDataAccess(DeliveryOption):
-#    protocol = models.CharField(max_length=20,
-#                                choices=DeliveryOption.PROTOCOL_CHOICES,
-#                                default=DeliveryOption.FTP,
-#                                unique=True)
-#
-#    class Meta:
-#        verbose_name_plural = 'online data accesses'
-#
-#    def __unicode__(self):
-#        return "{}:{}".format(self.__class__.__name__, self.protocol)
-
-
-#class OnlineDataDelivery(DeliveryOption):
-#    protocol = models.CharField(
-#        max_length=20,
-#        choices=DeliveryOption.PROTOCOL_CHOICES,
-#        default=DeliveryOption.FTP,
-#        unique=True
-#    )
-#
-#    class Meta:
-#        verbose_name_plural = 'online data deliveries'
-#
-#    def __unicode__(self):
-#        return "{}:{}".format(self.__class__.__name__, self.protocol)
-
-

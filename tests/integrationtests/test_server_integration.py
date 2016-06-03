@@ -73,6 +73,15 @@ class TestServer(object):
 
     @pytest.mark.django_db(transaction=True)
     def test_process_request_submit_product_order(self, settings):
+        UserModel = get_user_model()
+        test_user = UserModel.objects.create_user("test_user",
+                                                  "fake.email@dummy")
+        option_name = "dummyOption"
+        option_value = "dummy option value"
+        col_name = "dummy collection"
+        col_id = "dummy collection id"
+        settings.OSEOSERVER_ONLINE_DATA_ACCESS_OPTIONS = ["http"]
+        settings.OSEOSERVER_PROCESSING_OPTIONS = [{"name": option_name}]
         settings.OSEOSERVER_PRODUCT_ORDER = {
             "enabled": True,
             "automatic_approval": False,
@@ -81,13 +90,15 @@ class TestServer(object):
                               "exampleorderprocessor.ExampleOrderProcessor",
             "item_availability_days": 15,
         }
-        col_name = "dummy collection"
-        col_id = "dummy collection id"
         settings.OSEOSERVER_COLLECTIONS = [
             {
                 "name": col_name,
                 "collection_identifier": col_id,
-                "product_order": {"enabled": True}
+                "product_order": {
+                    "enabled": True,
+                    "options": [option_name],
+                    "online_data_access_options": ["http"]
+                }
             }
         ]
 
@@ -101,9 +112,6 @@ class TestServer(object):
                 option=[
                     BIND(oseo.ParameterData(encoding="XMLEncoding",
                                             values=xsd.anyType())),
-                    BIND(
-                        oseo.ParameterData(encoding="XMLEncoding",
-                                           values=xsd.anyType())),
                 ],
                 deliveryOptions=oseo.deliveryOptions(
                     onlineDataAccess=BIND(
@@ -130,14 +138,13 @@ class TestServer(object):
             request,
             ("oseo:orderSpecification/oseo:option[1]/oseo:ParameterData/"
             "oseo:values"),
-            format="fake format"
+            **{option_name: option_value}
         )
         request_data = etree.fromstring(request.toxml(encoding="utf-8"))
         server = OseoServer()
-        fake_user = None
-        response_element = server.process_request(request_data, fake_user)
+        response_element = server.process_request(request_data, test_user)
         root_tag = etree.QName(response_element.tag)
-        assert root_tag.localname == "Capabilities"
+        assert root_tag.localname == "SubmitAck"
         assert root_tag.namespace == constants.NAMESPACES["oseo"]
 
 

@@ -113,11 +113,11 @@ class OseoServer(object):
         operation, op_name = self._get_operation(schema_instance)
         response, order = operation(schema_instance, user)
         if op_name == "Submit":
-            if order.status == models.CustomizableItem.SUBMITTED:
+            if order.status == constants.OrderStatus.SUBMITTED:
                 utilities.send_moderation_email(order)
             else:
                 order_type = order.order_type.name
-                if order_type == models.Order.PRODUCT_ORDER:
+                if order_type == constants.OrderType.PRODUCT_ORDER:
                     self.dispatch_product_order(order)
         response_element = etree.fromstring(response.toxml(
             encoding=constants.ENCODING))

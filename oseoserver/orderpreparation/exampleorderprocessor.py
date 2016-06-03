@@ -20,6 +20,7 @@ implementation.
 
 from __future__ import absolute_import
 import logging
+import datetime as dt
 
 from lxml import etree
 from pyxb import BIND
@@ -128,6 +129,25 @@ class ExampleOrderProcessor(object):
         """
 
         return ["fake_identifier"]
+
+    def get_subscription_duration(self, order_options):
+        """Return the time interval where the subscription is active
+
+        Parameters
+        ----------
+        order_options: list
+            The options specified in the order specification
+
+        Returns
+        -------
+        begin: datetime.datetime
+            The initial date and time for the subscription
+        end: datetime.datetime
+            The ending date and time for the subscription
+
+        """
+
+        return dt.datetime.utcnow(), dt.datetime.utcnow()
 
     def process_item_online_access(identifier, item_id, order_id, user_name,
                                    packaging, options, delivery_options,
