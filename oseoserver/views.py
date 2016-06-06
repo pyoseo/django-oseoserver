@@ -2,12 +2,14 @@ from __future__ import absolute_import
 import os
 import os.path
 from datetime import datetime
+import logging
 
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.http import HttpResponseForbidden
 from django.http import HttpResponseNotFound
 from django.http import HttpResponseBadRequest
-
+from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404, get_list_or_404
 from django.views.decorators.csrf import csrf_exempt
 from lxml import etree
@@ -17,9 +19,12 @@ from .constants import ENCODING
 from . import errors
 from . import models
 from . import utilities
+from . import settings
 from . import soap
 from .server import OseoServer
 from .signals import signals
+
+logger = logging.getLogger(__name__)
 
 
 @csrf_exempt
@@ -45,8 +50,20 @@ def oseo_endpoint(request):
             try:
                 headers = soap.get_http_headers(soap_version)
                 details = soap.unwrap_request(request_element)
-                request_data, user, password, password_attributes = details
-                # authenticate and authorize user
+                request_data, username, password, password_attributes = details
+                logger.debug("username: {}".format(username))
+                logger.debug("password: {}".format(password))
+                logger.debug(
+                    "password_attributes: {}".format(password_attributes))
+                user = authenticate(username=username, password=password)
+                logger.debug("user: {}".format(user))
+                if user is None or not user.is_active:
+                    raise errors.OseoError(
+                        code="AuthenticationFailed",
+                        text="Invalid or missing identity information"
+                    )
+                # TODO: Add permissions for what a user is allowed to do
+
                 process_response = server.process_request(request_data, user)
                 status_code = 200
                 if soap_version is None:
@@ -64,10 +81,12 @@ def oseo_endpoint(request):
                 if soap_version is None:
                     response = exception_report
                 else:
-                    soap_fault_code = soap.get_soap_fault_code(err.text)
-                    response = soap.wrap_soap_fault(exception_report,
-                                                    soap_fault_code,
-                                                    soap_version)
+                    soap_fault_code = soap.get_soap_fault_code(err.code)
+                    response = soap.wrap_soap_fault(
+                        exception_element=exception_report,
+                        soap_code=soap_fault_code,
+                        soap_version=soap_version
+                    )
                 signals.invalid_request.send_robust(
                     sender=__name__,
                     request_data=request.body,

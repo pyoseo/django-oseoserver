@@ -47,6 +47,7 @@ from datetime import datetime
 import logging
 
 from django.db.models import Q
+from django.contrib.auth import get_user_model
 from lxml import etree
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows as ows_bindings
@@ -116,7 +117,7 @@ class OseoServer(object):
             if order.status == constants.OrderStatus.SUBMITTED:
                 utilities.send_moderation_email(order)
             else:
-                order_type = order.order_type.name
+                order_type = constants.OrderType(order.order_type)
                 if order_type == constants.OrderType.PRODUCT_ORDER:
                     self.dispatch_product_order(order)
         response_element = etree.fromstring(response.toxml(
@@ -150,7 +151,9 @@ class OseoServer(object):
         exception_report = ows_bindings.ExceptionReport(
             version=self.OSEO_VERSION)
         exception_report.append(exception)
-        return exception_report
+        result = etree.fromstring(
+            exception_report.toxml(encoding=constants.ENCODING))
+        return result
 
     def parse_xml(self, xml):
         """Parse the input XML request and return a valid PyXB object.
@@ -173,16 +176,19 @@ class OseoServer(object):
     def dispatch_product_order(self, order, force=False):
         """Dispatch a product order for processing in the async queue.
 
-        :arg order: the order to be dispatched
-        :type order: models.Order
-        :arg force: Should the order be dispatched even if it has not been
-        moderated?
+        Parameters
+        ----------
+
+        order: oseoserver.models.Order
+            The order to be dispatched
+        force: bool
+            Should the order be dispatched regardless of its status?
         :type force: bool
         """
 
-        if force:
-            order.status = models.CustomizableItem.ACCEPTED
-        if order.status == models.CustomizableItem.ACCEPTED:
+        status = (constants.OrderStatus.ACCEPTED if force
+                  else constants.OrderStatus(order.status))
+        if status == constants.OrderStatus.ACCEPTED:
             logger.debug("Sending order {} to processing queue...".format(
                 order.id))
             tasks.process_product_order.apply_async((order.id,))
@@ -302,7 +308,7 @@ class OseoServer(object):
         rejection_details = rejection_details or ("Order request has been "
                                                   "rejected by the "
                                                   "administrators")
-        if order.order_type.name == models.Order.PRODUCT_ORDER:
+        if order.order_type == constants.OrderType.PRODUCT_ORDER.value:
             self._moderate_request(
                 order,
                 approved,
@@ -311,7 +317,7 @@ class OseoServer(object):
                 rejection_details=rejection_details
             )
             self.dispatch_product_order(order)
-        elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
+        elif order.order_type == constants.OrderType.SUBSCRIPTION_ORDER.value:
             self._moderate_request(
                 order,
                 approved,
@@ -390,17 +396,17 @@ class OseoServer(object):
     def _moderate_request(self, order, approved, acceptance_details="",
                           rejection_details=""):
         if approved:
-            order.status = models.CustomizableItem.ACCEPTED
+            order.status = constants.OrderStatus.ACCEPTED.value
             order.additional_status_info = acceptance_details
         else:
-            order.status = models.CustomizableItem.CANCELLED
+            order.status = constants.OrderStatus.CANCELLED.value
             order.additional_status_info = rejection_details
 
-        mail_recipients = models.OseoUser.objects.filter(
-            Q(orders__id=order.id) | Q(user__is_staff=True)
-        ).exclude(user__email="")
+        mail_recipients = get_user_model().objects.filter(
+            Q(orders__id=order.id) | Q(is_staff=True)
+        ).exclude(email="")
 
-        if order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
+        if order.order_type == constants.OrderType.SUBSCRIPTION_ORDER.value:
             utilities.send_subscription_moderated_email(
                 order, approved, mail_recipients,
                 acceptance_details, rejection_details

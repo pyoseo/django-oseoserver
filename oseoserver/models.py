@@ -28,7 +28,7 @@ import pytz
 import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
-from . import managers
+#from . import managers
 from . import errors
 from . import settings
 from .constants import DeliveryOption
@@ -337,36 +337,6 @@ class InvoiceAddress(AbstractDeliveryAddress):
         verbose_name_plural = "invoice addresses"
 
 
-class ItemProcessor(models.Model):
-    PROCESSING_PARSE_OPTION = "option_parsing"
-    PROCESSING_PROCESS_ITEM = "item_processing"
-    PROCESSING_CLEAN_ITEM = "item_cleanup"
-
-    python_path = models.CharField(
-        max_length=255,
-        default="oseoserver.orderpreparation.exampleorderprocessor."
-                "ExampleOrderProcessor",
-        help_text="Python import path to a custom class that is used to "
-                  "process the order items. This class must conform to the "
-                  "expected interface."
-    )
-
-    def export_params(self, processing_step):
-        valid_params = dict()
-        if processing_step == self.PROCESSING_PARSE_OPTION:
-            qs = self.parameters.filter(use_in_option_parsing=True)
-        elif processing_step == self.PROCESSING_PROCESS_ITEM:
-            qs = self.parameters.filter(use_in_item_processing=True)
-        else:
-            qs = self.parameters.filter(use_in_item_cleanup=True)
-        for param in qs:
-            valid_params[param.name] = param.value
-        return valid_params
-
-    def __unicode__(self):
-        return self.python_path
-
-
 class OnlineAddress(models.Model):
     FTP = 'ftp'
     SFTP = 'sftp'
@@ -389,8 +359,6 @@ class OnlineAddress(models.Model):
 
 
 class Order(CustomizableItem):
-    MAX_ORDER_ITEMS = settings.get_max_order_items()
-
     PACKAGING_CHOICES = [(v.value, v.value) for v in Packaging]
     ORDER_TYPE_CHOICES = [(t.value, t.value) for t in OrderType]
 
@@ -401,7 +369,6 @@ class Order(CustomizableItem):
         default=OrderType.PRODUCT_ORDER.value,
         choices=ORDER_TYPE_CHOICES
     )
-
 
     last_describe_result_access_request = models.DateTimeField(null=True,
                                                                blank=True)
@@ -486,8 +453,16 @@ class Order(CustomizableItem):
         return '{}'.format(self.id)
 
 
+class OrderPendingModerationManager(models.Manager):
+
+    def get_queryset(self):
+        return super(OrderPendingModerationManager,
+                     self).get_queryset().filter(
+            status=OrderStatus.SUBMITTED.value)
+
+
 class OrderPendingModeration(Order):
-    objects = managers.OrderPendingModerationManager()
+    objects = OrderPendingModerationManager()
 
     class Meta:
         proxy = True
@@ -661,40 +636,9 @@ class OseoFile(models.Model):
         return self.url
 
 
-#class PaymentOption(AbstractOption):
-#
-#    def __unicode__(self):
-#        return self.name
-
-
-class ProcessorParameter(models.Model):
-    item_processor = models.ForeignKey("ItemProcessor",
-                                       related_name="parameters")
-    name = models.CharField(max_length=255)
-    value = models.CharField(max_length=255)
-    use_in_option_parsing = models.BooleanField(default=False)
-    use_in_item_processing = models.BooleanField(default=False)
-    use_in_item_cleanup = models.BooleanField(default=False)
-
-    def __unicode__(self):
-        return self.name
-
-
-#class SceneSelectionOption(AbstractOption):
-#
-#    def __unicode__(self):
-#        return self.name
-
-
-#class SceneSelectionOptionChoice(AbstractOptionChoice):
-#    scene_selection_option = models.ForeignKey('SceneSelectionOption',
-#                                               related_name='choices')
-
-
 class SelectedOption(models.Model):
     customizable_item = models.ForeignKey('CustomizableItem',
                                           related_name='selected_options')
-    #option = models.ForeignKey('Option')
     option = models.CharField(max_length=255)
     value = models.CharField(max_length=255, help_text='Value for this option')
 
@@ -707,7 +651,6 @@ class SelectedPaymentOption(models.Model):
                                       related_name='selected_payment_option',
                                       null=True,
                                       blank=True)
-    #option = models.ForeignKey('PaymentOption')
     option = models.CharField(max_length=255)
 
     def __unicode__(self):
@@ -719,7 +662,6 @@ class SelectedSceneSelectionOption(models.Model):
         'OrderItem',
         related_name='selected_scene_selection_options'
     )
-    #option = models.ForeignKey('SceneSelectionOption')
     option = models.CharField(max_length=255)
     value = models.CharField(max_length=255,
                              help_text='Value for this option')
@@ -737,7 +679,6 @@ class SelectedDeliveryOption(models.Model):
         blank=True,
         null=True
     )
-    #option = models.ForeignKey('DeliveryOption')
     delivery_type = models.CharField(
         max_length=30,
         choices=DELIVERY_CHOICES,
@@ -758,7 +699,7 @@ class SelectedDeliveryOption(models.Model):
     special_instructions = models.TextField(blank=True)
 
     def __unicode__(self):
-        return self.option.__unicode__()
+        return "{0.delivery_type}, {0.delivery_details}".format(self)
 
 
 class SubscriptionBatch(Batch):

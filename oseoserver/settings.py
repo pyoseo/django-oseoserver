@@ -9,8 +9,9 @@ def _get_setting(parameter, default_value):
     return getattr(settings, parameter, default_value)
 
 
-def get_authentication_class():
-    return _get_setting("OSEOSERVER_AUTHENTICATION_CLASS", "")
+#def get_authentication_class():
+#    return _get_setting("OSEOSERVER_AUTHENTICATION_CLASS",
+#                        "oseoserver.auth.noop.NoAuthentication")
 
 
 def get_processing_class():

@@ -19,7 +19,14 @@ The celery worker can be started with the command:
 
 .. code:: bash
 
-   pyoseo/pyoseo$ celery worker --app=pyoseo.celery_app --loglevel=info
+   pyoseo/pyoseo$ celery worker --app=config --loglevel=info
+
+And the flower monitoring tool can be started with:
+
+.. code:: bash
+
+   pyoseo/pyoseo$ celery flower --app=config
+
 """
 
 # TODO

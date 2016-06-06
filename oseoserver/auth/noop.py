@@ -16,6 +16,11 @@
 A default no authentication option for PyOSEO
 """
 
+from django.contrib.auth import get_user_model
+
+from .. import settings
+
+
 class NoAuthentication(object):
 
     def authenticate_request(self, user_name, password, **kwargs):

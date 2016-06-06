@@ -64,7 +64,7 @@ class Submit(OseoOperation):
         status_notification = self.validate_status_notification(request)
         if request.orderSpecification is not None:
             requested_spec = request.orderSpecification
-            if len(requested_spec.orderItem) > models.Order.MAX_ORDER_ITEMS:
+            if len(requested_spec.orderItem) > settings.get_max_order_items():
                 raise errors.OseoError("NoApplicableCode",
                                        "Code not applicable")
             order_spec = self.process_order_specification(
@@ -152,7 +152,7 @@ class Submit(OseoOperation):
             OrderType.TASKING_ORDER: models.TaskingOrder,
         }.get(order_type)
         order = OrderModel(
-            status=default_status,
+            status=default_status.value,
             additional_status_info=additional_status_info,
             mission_specific_status_info="",
             remark=order_remark,
@@ -290,7 +290,8 @@ class Submit(OseoOperation):
         spec["order_remark"] = _c(order_specification.orderRemark)
         spec["packaging"] = self._validate_packaging(
             order_specification.packaging)
-        spec["priority"] = Priority(_c(order_specification.priority))
+        spec["priority"] = Priority(
+            _c(order_specification.priority) or Priority.STANDARD.value)
         spec["delivery_information"] = self.get_delivery_information(
             order_specification.deliveryInformation)
         spec["invoice_address"] = self.get_invoice_address(

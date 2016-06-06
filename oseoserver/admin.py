@@ -8,26 +8,12 @@ from . import models
 from .server import OseoServer
 
 
-class ProcessorParameterInline(admin.StackedInline):
-    model = models.ProcessorParameter
-    extra = 1
-
 class OseoFileInline(admin.StackedInline):
     model = models.OseoFile
     extra = 1
 
     def has_add_permission(self, request):
         return False
-
-
-#class OptionChoiceInline(admin.StackedInline):
-#    model = models.OptionChoice
-#    extra = 1
-
-
-#class OptionInline(admin.StackedInline):
-#    model = models.Option
-#    extra = 1
 
 
 class SelectedOptionInline(admin.StackedInline):
@@ -38,6 +24,7 @@ class SelectedOptionInline(admin.StackedInline):
 class ExtensionInline(admin.StackedInline):
     model = models.Extension
     extra = 1
+
 
 class SelectedDeliveryOptionInline(admin.StackedInline):
     model = models.SelectedDeliveryOption
@@ -54,52 +41,8 @@ class SelectedSceneSelectionOptionInline(admin.StackedInline):
     extra = 1
 
 
-#class ProductOrderConfigurationInline(admin.StackedInline):
-#    model = models.ProductOrderConfiguration
-#    extra = 1
-#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-#                         'scene_selection_options',)
-#
-#
-#class MassiveOrderConfigurationInline(admin.StackedInline):
-#    model = models.MassiveOrderConfiguration
-#    extra = 1
-#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-#                         'scene_selection_options',)
-#
-#
-#class SubscriptionOrderConfigurationInline(admin.StackedInline):
-#    model = models.SubscriptionOrderConfiguration
-#    extra = 1
-#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-#                         'scene_selection_options',)
-#
-#
-#class TaskingOrderConfigurationInline(admin.StackedInline):
-#    model = models.TaskingOrderConfiguration
-#    extra = 1
-#    filter_horizontal = ('options', 'delivery_options', 'payment_options',
-#                         'scene_selection_options',)
-#
-#
-#@admin.register(models.OseoGroup)
-#class OseoGroupAdmin(admin.ModelAdmin):
-#    list_display = ("name", "authentication_class",)
-#
-#
-#@admin.register(models.OseoUser)
-#class OseoUserAdmin(admin.ModelAdmin):
-#    list_display = ('user', 'oseo_group', 'disk_quota',
-#                    'delete_downloaded_order_files',)
-#    list_editable = ('oseo_group',)
-#    fields = ('user', 'disk_quota', 'delete_downloaded_order_files')
-#    readonly_fields = ('user',)
-
-
 @admin.register(models.Order)
 class OrderAdmin(admin.ModelAdmin):
-    #inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,
-    #           ExtensionInline)
     inlines = (ExtensionInline,)
     fieldsets = (
         (None, {
@@ -123,12 +66,8 @@ class OrderAdmin(admin.ModelAdmin):
 
 @admin.register(models.OrderPendingModeration)
 class PendingOrderAdmin(admin.ModelAdmin):
-    actions = ['approve_order', 'reject_order',]
-    list_display = ("id", "order_type", "user",)
-
-    def get_queryset(self, request):
-        qs = super(PendingOrderAdmin, self).get_queryset(request)
-        return qs.filter(status=models.CustomizableItem.SUBMITTED)
+    actions = ['approve_order', 'reject_order']
+    list_display = ("id", "order_type", "user")
 
     def get_actions(self, request):
         actions = super(PendingOrderAdmin, self).get_actions(request)
@@ -181,7 +120,7 @@ class OrderItemAdmin(admin.ModelAdmin):
                        'status_changed_on', 'completed_on',
                        'identifier', 'collection',)
         }),
-        ('Further info',{
+        ('Further info', {
             'classes': ('collapse',),
             'fields': ('remark',
                        'additional_status_info',
@@ -203,7 +142,6 @@ class OrderItemAdmin(admin.ModelAdmin):
     link_to_batch.short_description = 'Batch'
     link_to_batch.allow_tags = True
 
-
     def link_to_order(self, obj):
         url = reverse('admin:oseoserver_order_change',
                       args=(obj.batch.order_id,))
@@ -211,48 +149,6 @@ class OrderItemAdmin(admin.ModelAdmin):
         return format_html(html)
     link_to_order.short_description = 'Order'
     link_to_order.allow_tags = True
-
-
-#@admin.register(models.Option)
-#class OptionAdmin(admin.ModelAdmin):
-#    list_display = ('id', 'name', 'available_choices', 'multiple_entries',)
-#    inlines = [OptionChoiceInline,]
-
-
-#@admin.register(models.PaymentOption)
-#class PaymentOptionAdmin(admin.ModelAdmin):
-#    pass
-
-
-#@admin.register(models.SceneSelectionOption)
-#class SceneSelectionOptionAdmin(admin.ModelAdmin):
-#    pass
-
-
-#@admin.register(models.DeliveryOption)
-#class DeliveryOptionAdmin(admin.ModelAdmin):
-#    pass
-
-
-
-#@admin.register(models.Collection)
-#class CollectionAdmin(admin.ModelAdmin):
-#    inlines = (ProductOrderConfigurationInline,
-#               MassiveOrderConfigurationInline,
-#               SubscriptionOrderConfigurationInline,
-#               TaskingOrderConfigurationInline,)
-#    list_display = ('name',
-#                    'collection_id',
-#                    'product_orders',
-#                    'massive_orders',
-#                    'subscription_orders',
-#                    'tasking_orders',)
-#    #filter_horizontal = ('authorized_groups',)
-
-
-#@admin.register(models.OrderConfiguration)
-#class OrderConfigurationAdmin(admin.ModelAdmin):
-#    pass
 
 
 @admin.register(models.Batch)
@@ -266,40 +162,7 @@ class SubscriptionBatchAdmin(admin.ModelAdmin):
     list_display = ('id', 'timeslot', 'collection', 'status', 'price',
                     'created_on', 'completed_on', 'updated_on',)
 
-#@admin.register(models.MediaDelivery)
-#class MediaDeliveryAdmin(admin.ModelAdmin):
-#    list_display = ("package_medium", "shipping_instructions", "delivery_fee")
 
-#@admin.register(models.OrderType)
-#class OrderTypeAdmin(admin.ModelAdmin):
-#    list_display = ("name", "enabled", "automatic_approval",
-#                    "item_processor", "item_availability_days",
-#                    "notify_creation",)
-#    list_editable = ("enabled", "automatic_approval", "notify_creation",)
-#    readonly_fields = ("name",)
-#    fieldsets = (
-#        (None, {
-#            'fields': ("name", "enabled", "automatic_approval",
-#                       "notify_creation", "item_processor",
-#                       "item_availability_days",),
-#        }),
-#    )
-#
-#    def has_add_permission(self, request):
-#        return False
-#
-#    def has_delete_permission(self, request, obj=None):
-#        return False
-
-
-
-@admin.register(models.ItemProcessor)
-class ItemProcessorAdmin(admin.ModelAdmin):
-    inlines = (ProcessorParameterInline,)
-
-
-#admin.site.register(models.OnlineDataAccess)
-#admin.site.register(models.OnlineDataDelivery)
 admin.site.register(models.DeliveryInformation)
 admin.site.register(models.OnlineAddress)
 admin.site.register(models.InvoiceAddress)

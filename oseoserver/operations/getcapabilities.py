@@ -109,9 +109,12 @@ class GetCapabilities(OseoOperation):
             c = oseo.CollectionCapability(
                 collectionId=collection["collection_identifier"],
                 ProductOrders=BIND(
-                    supported=collection["product_order"]["enabled"]),
+                    supported=collection.get(
+                        "product_order",
+                        {"enabled": False})["enabled"]),
                 SubscriptionOrders=BIND(
-                    supported=collection["subscription_order"]["enabled"]),
+                    supported=collection.get("subscription_order",
+                                             {"enabled": False})["enabled"]),
                 DescribeResultAccessCapabilities=BIND(supported=True),
                 CancelCapabilities=BIND(supported=True, asynchronous=False),
             )
