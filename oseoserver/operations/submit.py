@@ -31,6 +31,7 @@ from ..utilities import _n, _c
 from ..constants import ENCODING
 from ..constants import DeliveryOption
 from ..constants import DeliveryOptionProtocol
+from ..constants import DeliveryMedium
 from ..constants import OrderType
 from ..constants import OrderStatus
 from ..constants import Priority
@@ -343,8 +344,10 @@ class Submit(OseoOperation):
             order_type,
             collection_config["name"]
         )
-        item["delivery_options"] = self._validate_delivery_options(
+        item["delivery_options"] = self.get_delivery_options(
             requested_item.deliveryOptions, specific_order_config)
+        #item["delivery_options"] = self._validate_delivery_options(
+        #    requested_item.deliveryOptions, specific_order_config)
         item["scene_selection"] = dict()  # not implemented yet
         item["payment"] = None  # not implemented yet
         # extensions to the CommonOrderItemType are not implemented yet
@@ -392,7 +395,6 @@ class Submit(OseoOperation):
         """
 
         generic_config = utilities.get_generic_order_config(order_type)
-        print("generic_config: {}".format(generic_config))
         if not generic_config.get("enabled", False):
             if order_type in (OrderType.PRODUCT_ORDER,
                               OrderType.MASSIVE_ORDER):
@@ -477,48 +479,101 @@ class Submit(OseoOperation):
             raise errors.InvalidParameterValueError("collectionId")
         return result
 
-    def _validate_delivery_options(self, requested_delivery_options,
-                                   order_config):
-        """Validate the requested delivery options for an item.
+    def get_delivery_options(self, requested_delivery_options, order_config):
+        delivery = None
+        if requested_delivery_options is not None:
+            oda = requested_delivery_options.onlineDataAccess
+            odd = requested_delivery_options.onlineDataDelivery
+            md = requested_delivery_options.mediaDelivery
+            if oda is not None:
+                delivery = {
+                    "type": DeliveryOption.ONLINE_DATA_ACCESS,
+                    "protocol": self._get_online_data_access_delivery_options(
+                        oda, order_config)
+                }
+            elif odd is not None:
+                delivery = {
+                    "type": DeliveryOption.ONLINE_DATA_DELIVERY,
+                    "protocol": self._get_online_data_delivery_options(
+                        odd, order_config)
+                }
+            elif md is not None:
+                medium, shipping = self._get_media_delivery_options(
+                    md, order_config)
+                delivery = {
+                    "type": DeliveryOption.MEDIA_DELIVERY,
+                    "medium": medium,
+                    "shipping_instructions": shipping
+                }
+            else:
+                raise TypeError("Invalid requested_delivery_options")
+            delivery["copies"] = requested_delivery_options.numberOfCopies or 1
+            delivery["annotation"] = _c(
+                requested_delivery_options.productAnnotation)
+            delivery["special_instructions"] = _c(
+                requested_delivery_options.specialInstructions)
+        return delivery
 
-        The input requested_item can be an order or an order item
+    def _get_online_data_access_delivery_options(self, online_data_access,
+                                                 order_config):
+        """Retrieve and validate online data access option.
 
         Parameters
         ----------
-        requested_delivery_options: oseo.DeliveryOptionsType or None
-            The order or order item to validate
+        online_data_access: oseo.DeliveryOptionsType.onlineDataAccess
+            A pyxb element with the online data access option
         order_config: dict
             Configuration parameters for the requested order type and the
             current collection
 
-        Returns
-        -------
-        dict
-            The requested delivery options, alraedy validated
+        """
+
+        protocol = DeliveryOptionProtocol(online_data_access.protocol)
+        collection_specific_options = order_config.get(
+            "online_data_access_options", [])
+        general_options = settings.get_online_data_access_options()
+        general_protocols = [i["protocol"] for i in general_options]
+        if (protocol.value not in collection_specific_options or
+                protocol.value not in general_protocols):
+            raise errors.InvalidParameterValueError("protocol")
+        return protocol
+
+
+    def _get_online_data_delivery_options(self, online_data_delivery,
+                                          order_config):
+        """Retrieve and validate online data delivery option.
+
+        Parameters
+        ----------
+        online_data_delivery: oseo.DeliveryOptionsType.onlineDataDelivery
+            A pyxb element with the online data delivery option
+        order_config: dict
+            Configuration parameters for the requested order type and the
+            current collection
 
         """
 
-        delivery = None
-        dop = requested_delivery_options
-        if dop is not None:
-            delivery = dict()
-            if dop.onlineDataAccess is not None:
-                delivery["type"] = DeliveryOption.ONLINE_DATA_ACCESS
-                delivery["protocol"] = DeliveryOptionProtocol(
-                    dop.onlineDataAccess.protocol)
-            elif dop.onlineDataDelivery is not None:
-                delivery["type"] = DeliveryOption.ONLINE_DATA_DELIVERY
-                delivery["protocol"] = DeliveryOptionProtocol(
-                    dop.onlineDataDelivery.protocol)
-            else:
-                delivery["type"] = DeliveryOption.MEDIA_DELIVERY
-                delivery["medium"] = dop.mediaDelivery.packageMedium
-                delivery["shipping_instructions"] = (
-                    dop.mediaDelivery.shippingInstructions)
-            delivery["copies"] = dop.numberOfCopies or 1
-            delivery["annotation"] = _c(dop.productAnnotation)
-            delivery["special_instructions"] = _c(dop.specialInstructions)
-        return delivery
+        protocol = DeliveryOptionProtocol(online_data_delivery.protocol)
+        collection_specific_options = order_config.get(
+            "online_data_delivery_options", [])
+        general_options = settings.get_online_data_delivery_options()
+        general_protocols = [i["protocol"] for i in general_options]
+        if (protocol.value not in collection_specific_options or
+                protocol.value not in general_protocols):
+            raise errors.InvalidParameterValueError("protocol")
+        return protocol
+
+    def _get_media_delivery_options(self, media_delivery, order_config):
+        medium = DeliveryMedium(media_delivery.packageMedium)
+        shipping = media_delivery.shippingInstructions
+        collection_specific_options = order_config.get(
+            "media_delivery_options", [])
+        general_options = settings.get_media_delivery_options()
+        general_media = [i["type"] for i in general_options["media"]]
+        if (medium.value not in collection_specific_options or
+                medium.value not in general_media):
+            raise errors.InvalidParameterValueError("packageMedium")
+        return medium, shipping
 
     def _validate_global_delivery_options(self, order_specification,
                                           order_type, collections):
@@ -548,11 +603,8 @@ class Submit(OseoOperation):
         for collection_name in collections:
             config = utilities.get_order_configuration(order_type,
                                                        collection_name)
-            delivery_options.update(
-                self._validate_delivery_options(
-                    order_specification.deliveryOptions,
-                    config
-            ))
+            delivery_options.update(self.get_delivery_options(
+                order_specification.deliveryOptions, config))
         return delivery_options
 
     def _validate_global_options(self, order_specification,

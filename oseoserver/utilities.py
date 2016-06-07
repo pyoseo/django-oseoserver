@@ -84,10 +84,11 @@ def get_order_configuration(order_type, collection):
 
     for collection_config in settings.get_collections():
         is_collection = collection_config.get("name") == collection
-        is_enabled = collection_config.get(order_type.value.lower(),
-                                           {}).get("enabled", False)
+        type_specific_config = collection_config.get(
+            order_type.value.lower(), {})
+        is_enabled = type_specific_config.get("enabled", False)
         if is_collection and is_enabled:
-            result = collection_config
+            result = type_specific_config
             break
     else:
         if order_type in (constants.OrderType.PRODUCT_ORDER,
@@ -113,7 +114,6 @@ def get_option_configuration(option_name):
 
 
 def validate_collection_id(collection_id):
-    print("collection_id: {}".format(collection_id))
     for collection_config in settings.get_collections():
         if collection_config.get("collection_identifier") == collection_id:
             result = collection_config
@@ -128,9 +128,7 @@ def validate_processing_option(name, value, order_type, collection_name):
 
     # 1. can this option be used with the current collection and order_type?
     collection_config = get_order_configuration(order_type, collection_name)
-    allowed_options = collection_config[order_type.value.lower()].get(
-        "options")
-    if name not in allowed_options:
+    if name not in collection_config.get("options", []):
         raise errors.InvalidParameterValueError("option", value=name)
 
     # 2. Lets get the parsed value for the option using the external
@@ -147,7 +145,6 @@ def validate_processing_option(name, value, order_type, collection_name):
         )
 
     # 3. is the parsed value legal?
-    print("parsed_value: {}".format(parsed_value))
     for option in settings.get_processing_options():
         if option.get("name") == name:
             choices = option.get("choices", [])
@@ -160,6 +157,30 @@ def validate_processing_option(name, value, order_type, collection_name):
     return parsed_value
 
 
+def get_item_processor(customizable_item):
+    """Return an instance of customizable item's item processor
+
+    Parameters
+    ----------
+    customizable_item: models.Order or models.OrderItem
+        The django model instance representing the current item or order
+
+    """
+
+    try:
+        order_type = constants.OrderType(
+            customizable_item.batch.order.order_type)
+    except AttributeError:
+        order_type = constants.OrderType(
+            customizable_item.order_type)
+    generic_order_config_func = getattr(
+        settings, "get_{}".format(order_type.value.lower()))
+    generic_order_config = generic_order_config_func()
+    processor_class_path = generic_order_config.get("item_processor")
+    return import_class(processor_class_path)
+
+
+# FIXME: Remove this function, it is not needed anymore
 def get_custom_code(generic_order_configuration, processing_step):
     item_processor = generic_order_configuration["processor"]
     processing_class = item_processor.python_path
@@ -169,7 +190,7 @@ def get_custom_code(generic_order_configuration, processing_step):
     return processing_class, params
 
 
-
+# FIXME: Remove this function, it is not needed anymore
 def get_processor(order_type, processing_step,
                   *instance_args, **instance_kwargs):
     processing_class, params = get_custom_code(order_type, processing_step)

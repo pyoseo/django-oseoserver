@@ -562,18 +562,21 @@ class OrderItem(CustomizableItem):
             "copies": delivery.copies,
             "annotation": delivery.annotation,
             "special_instructions": delivery.special_instructions,
-            "delivery_fee": delivery.option.delivery_fee,
+            "delivery_type": delivery.delivery_type,
+            #"delivery_fee": delivery.option.delivery_fee,
         }
-        if hasattr(delivery.option, "onlinedataaccess"):
-            valid_delivery["delivery_type"] = "onlinedataaccess"
-            valid_delivery["protocol"] = \
-                delivery.option.onlinedataaccess.protocol
-        elif hasattr(delivery.option, "onlinedatadelivery"):
-            valid_delivery["delivery_type"] = "onlinedatadelivery"
-            valid_delivery["protocol"] = \
-                delivery.option.onlinedatadelivery.protocol
-        else:  # media delivery
-            valid_delivery["delivery_type"] = "mediadelivery"
+        if delivery.delivery_type == DeliveryOption.ONLINE_DATA_ACCESS.value:
+            protocol = delivery.delivery_details
+            allowed_options = settings.get_online_data_access_options()
+            fee = [opt.get("fee", 0) for opt in allowed_options if opt["protocol"] == protocol][0]
+            valid_delivery["protocol"] = protocol
+
+        elif delivery.delivery_type == DeliveryOption.ONLINE_DATA_DELIVERY.value:
+            pass
+
+
+        elif delivery.delivery_type == DeliveryOption.MEDIA_DELIVERY.value:
+            valid_delivery["medium"] = delivery.delivery_details
         return valid_delivery
 
     def create_oseo_status_item_type(self):

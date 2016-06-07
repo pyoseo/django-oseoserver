@@ -37,6 +37,7 @@ And the flower monitoring tool can be started with:
 from __future__ import division
 from __future__ import absolute_import
 from datetime import datetime, timedelta
+import itertools
 import sys
 import time
 import traceback
@@ -51,6 +52,10 @@ import pytz
 
 from . import models
 from . import utilities
+from . import settings
+from .constants import OrderStatus
+from .constants import OrderType
+from .constants import DeliveryOption
 
 logger = get_task_logger(__name__)
 
@@ -66,7 +71,7 @@ def process_product_order(self, order_id):
 
     try:
         order = models.ProductOrder.objects.get(pk=order_id)
-        order.status = models.CustomizableItem.IN_PRODUCTION
+        order.status = OrderStatus.IN_PRODUCTION.value
         order.additional_status_info = "Order is being processed"
         order.save()
     except models.ProductOrder.DoesNotExist:
@@ -128,79 +133,78 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
     """
     Process an order item that specifies online data access as delivery.
 
-    :arg order_item_id: The id of the order item that is to be processed. It
-        corresponds to the primary key of the object in the database.
-    :type order_item_id: int
-    :arg max_tries: How many times should the processing of the item be
-        attempted if it fails?
-    :type max_tries: int
-    :arg sleep_interval: How long (in seconds) should the server wait before
-        attempting another execution?
-    :type sleep_interval: int
-
     This task calls the user defined ItemProcessor to do the actual processing
     of order items.
+
+    Parameters
+    ----------
+    order_item_id: int
+        The primarykey value of the order item in the database
+    max_tries: int, optional
+        How many times should the processing be retried, in case it fails
+    sleep_interval: int, optional
+        How many seconds should the worker sleep before retrying the
+        processing
+
     """
 
     order_item = models.OrderItem.objects.get(pk=order_item_id)
-    order_item.status = models.CustomizableItem.IN_PRODUCTION
+    order_item.status = OrderStatus.IN_PRODUCTION.value
     order_item.additional_status_info = "Item is being processed"
     order_item.save()
     order = order_item.batch.order
-    current_try = 0
-    item_processed = False
-    error_details = ""
-    while current_try < max_tries and not item_processed:
+    order_type = OrderType(order_item.batch.order.order_type)
+    generic_order_config = utilities.get_generic_order_config(order_type)
+    item_processor = utilities.get_item_processor(order_item)
+    options = order_item.export_options()
+    delivery_options = order_item.export_delivery_options()
+    for current_try in itertools.count():
         try:
-            processor, params = utilities.get_processor(
-                order.order_type,
-                models.ItemProcessor.PROCESSING_PROCESS_ITEM,
-            )
-            options = order_item.export_options()
-            delivery_options = order_item.export_delivery_options()
-            urls, details = processor.process_item_online_access(
-                order_item.identifier, order_item.item_id, order.id,
-                order.user.user.username, options, delivery_options,
-                #domain=Site.objects.get_current().domain,
+            urls, details = item_processor.process_item_online_access(
+                identifier=order_item.identifier,
+                item_id=order_item.item_id,
+                order_id=order.id,
+                user_name=order.user.username,
+                options=options,
+                delivery_options=delivery_options,
                 domain=django_settings.OSEOSERVER_SITE_DOMAIN,
-                sub_uri=django_settings.SITE_SUB_URI,
-                **params)
-            order_item.additional_status_info = details
-            if any(urls):
+                sub_uri=django_settings.SITE_SUB_URI
+            )
+            if not any(urls):
+                order_item.status = OrderStatus.FAILED.value
+                raise RuntimeError
+            else:
+                order_item.additional_status_info = details
                 now = datetime.now(pytz.utc)
                 expiry_date = now + timedelta(
-                    days=order.order_type.item_availability_days)
-                order_item.status = models.CustomizableItem.COMPLETED
+                    days=generic_order_config.get("item_availability_days",1))
+                order_item.status = OrderStatus.COMPLETED.value
                 order_item.completed_on = now
                 for url in urls:
                     f = models.OseoFile(url=url, available=True,
                                         order_item=order_item,
                                         expires_on=expiry_date)
                     f.save()
-                item_processed = True
-            else:
-                order_item.status = models.CustomizableItem.FAILED
-                logger.error('THERE HAS BEEN AN ERROR: order item {} has '
-                             'failed'.format(order_item_id))
-        except Exception as e:
+                break   # leave the enclosing for loop
+        except Exception:
             formatted_tb = traceback.format_exception(*sys.exc_info())
-            error_message = "Attempt ({}/{}). Error: {}.".format(
-                current_try+1, max_tries, formatted_tb)
-            order_item.status = models.CustomizableItem.FAILED
+            error_message = (
+                "Could not process order item {!r} (Attempt {}/{}). The error "
+                "was: {}".format(order_item_id, current_try+1, max_tries,
+                                 formatted_tb)
+            )
+            logger.error(error_message)
+            order_item.status = OrderStatus.FAILED.value
             order_item.additional_status_info = error_message
-            error_details += error_message
-            logger.error("THERE HAS BEEN AN ERROR: order item {} has "
-                         "failed with the error: {}".format(order_item_id,
-                                                            formatted_tb))
-        current_try += 1
-        if not item_processed:
-            logger.critical("Could not process the item ("
-                            "Attempt {}/{})".format(current_try, max_tries))
-            _send_failed_attempt_email(order, order_item, error_details)
+
             if current_try < max_tries:
-                logger.critical("Trying again in {} "
-                                "minutes...".format(sleep_interval/60))
+                # sleep a bit and then try again, maybe it'll work later
+                logger.info(
+                    "Trying again in {} minutes...".format(sleep_interval/60))
                 time.sleep(sleep_interval)
+            else: # we won't try anymore, it does not work
+                _send_failed_attempt_email(order, order_item, error_message)
+                break  # leave the enclosing for loop
     order_item.save()
 
 
@@ -245,26 +249,25 @@ def update_product_order_status(self, order_id):
     order = models.ProductOrder.objects.get(pk=order_id)
     old_order_status = order.status
     batch = order.batches.get()  # ProductOrder's have only one batch
-    if batch.status() == models.CustomizableItem.COMPLETED and \
-                    order.packaging != '':
+    if batch.status() == OrderStatus.COMPLETED.value and order.packaging != '':
         try:
             _package_batch(batch, order.packaging)
         except Exception as e:
-            order.status = models.CustomizableItem.FAILED
+            order.status = OrderStatus.FAILED.value
             order.additional_status_info = str(e)
             order.save()
             raise
     new_order_status = batch.status()
-    if old_order_status != new_order_status or \
-                    old_order_status == models.CustomizableItem.FAILED:
+    if (old_order_status != new_order_status or
+                old_order_status == OrderStatus.FAILED.value):
         order.status = new_order_status
-        if new_order_status == models.CustomizableItem.COMPLETED:
+        if new_order_status == OrderStatus.COMPLETED.value:
             order.completed_on = datetime.now(pytz.utc)
             order.additional_status_info = ""
-        elif new_order_status == models.CustomizableItem.FAILED:
+        elif new_order_status == OrderStatus.FAILED.value:
             details = []
             for oi in batch.order_items.all():
-                if oi.status == models.CustomizableItem.FAILED:
+                if oi.status == OrderStatus.FAILED.value:
                     additional = oi.additional_status_info
                     details.append((oi.id, additional))
             msg = "\n".join(["* Order item {}: {}".format(oi, det) for
@@ -354,8 +357,7 @@ def terminate_expired_subscriptions(self):
 
 
 def _process_batch(batch_id):
-    """
-    Generate a celery group with subtasks for every order item in the batch.
+    """Generate a celery group with subtasks for every order item in the batch.
     """
 
     print("batch_id: {}".format(batch_id))
@@ -371,37 +373,31 @@ def _process_batch(batch_id):
             selected = order_item.selected_delivery_option
         except models.SelectedDeliveryOption.DoesNotExist:
             selected = order.selected_delivery_option
-        if hasattr(selected.option, 'onlinedataaccess'):
-            sig = process_online_data_access_item.subtask((order_item.id,))
-        elif hasattr(selected.option, 'onlinedatadelivery'):
-            sig = process_online_data_delivery_item.subtask((order_item.id,))
-        elif hasattr(selected.option, 'mediadelivery'):
-            sig = process_media_delivery_item.subtask((order_item.id,))
-        else:
-            raise
+        task_func = {
+            DeliveryOption.ONLINE_DATA_ACCESS.value:
+                process_online_data_access_item,
+            DeliveryOption.ONLINE_DATA_DELIVERY.value:
+                process_online_data_delivery_item,
+            DeliveryOption.MEDIA_DELIVERY.value: process_media_delivery_item,
+        }[selected.delivery_type]
+        sig = task_func.subtask((order_item.id,))
         g.append(sig)
     return group(g)
 
 
 def _package_batch(batch, compression):
-    order_type = batch.order.order_type
-    processor, params = utilities.get_processor(
-        order_type,
-        models.ItemProcessor.PROCESSING_PROCESS_ITEM,
-        logger_type="pyoseo"
-    )
-    #domain = Site.objects.get_current().domain
+    item_processor = utilities.get_item_processor(batch.order)
     domain = django_settings.OSEOSERVER_SITE_DOMAIN
     files_to_package = []
     try:
         for item in batch.order_items.all():
             for oseo_file in item.files.all():
                 files_to_package.append(oseo_file.url)
-        packed = processor.package_files(
-            compression, domain,
-            file_urls=files_to_package,
+        packed = item_processor.package_files(
+            packaging=compression,
+            domain=domain,
             site_name=django_settings.SITE_SUB_URI,
-            **params
+            file_urls=files_to_package,
         )
     except Exception as e:
         logger.error("there has been an error packaging the "
@@ -424,3 +420,4 @@ def test_task(self):
     logger.info('logging something from within a task with level: info')
     logger.warning('logging something from within a task with level: warning')
     logger.error('logging something from within a task with level: error')
+

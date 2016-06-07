@@ -21,6 +21,7 @@ setup(
         "django-mail-queue",
         "django-sendfile",
         "enum34",
+        "flower",
         "html2text",
         #"librabbitmq",
         "lxml",

@@ -150,8 +150,7 @@ class ExampleOrderProcessor(object):
         return dt.datetime.utcnow(), dt.datetime.utcnow()
 
     def process_item_online_access(identifier, item_id, order_id, user_name,
-                                   packaging, options, delivery_options,
-                                   **kwargs):
+                                   packaging, options, delivery_options):
         """
         Process an item that has been ordered.
 

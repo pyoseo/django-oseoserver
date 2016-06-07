@@ -102,8 +102,14 @@ def get_online_data_access_options():
     return _get_setting(
         "OSEOSERVER_ONLINE_DATA_ACCESS_OPTIONS",
         [
-            constants.DeliveryOptionProtocol.FTP.value,
-            constants.DeliveryOptionProtocol.HTTP.value,
+            {
+                "protocol": constants.DeliveryOptionProtocol.FTP.value,
+                "fee": 0,
+            },
+            {
+                "protocol": constants.DeliveryOptionProtocol.HTTP.value,
+                "fee": 0,
+            }
         ]
     )
 
@@ -112,7 +118,10 @@ def get_online_data_delivery_options():
     return _get_setting(
         "OSEOSERVER_ONLINE_DATA_DELIVERY_OPTIONS",
         [
-            constants.DeliveryOptionProtocol.FTP.value,
+            {
+                "protocol": constants.DeliveryOptionProtocol.FTP.value,
+                "fee": 0,
+            },
         ]
     )
 
@@ -122,7 +131,10 @@ def get_media_delivery_options():
         "OSEOSERVER_MEDIA_DELIVERY_OPTIONS",
         {
             "media": [
-                constants.DeliveryMedium.CD_ROM,
+                {
+                    "type": constants.DeliveryMedium.CD_ROM,
+                    "fee": 0,
+                }
             ],
             "shipping": [
                 constants.DeliveryMethod.ALL_READY,
