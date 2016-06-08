@@ -45,8 +45,6 @@ import traceback
 from celery import shared_task
 from celery import group, chord, chain
 from celery.utils.log import get_task_logger
-from django.conf import settings as django_settings
-#from django.contrib.sites.models import Site
 from django.contrib.auth.models import User
 import pytz
 
@@ -128,13 +126,9 @@ def notify_user_product_batch_available(self, batch_id):
 
 
 @shared_task(bind=True)
-def process_online_data_access_item(self, order_item_id, max_tries=6,
-                                    sleep_interval=30):
-    """
-    Process an order item that specifies online data access as delivery.
-
-    This task calls the user defined ItemProcessor to do the actual processing
-    of order items.
+def process_online_data_access_item(self, order_item_id, max_tries=3,
+                                    sleep_interval=10):
+    """Process order items that specify online data access as delivery.
 
     Parameters
     ----------
@@ -149,63 +143,26 @@ def process_online_data_access_item(self, order_item_id, max_tries=6,
     """
 
     order_item = models.OrderItem.objects.get(pk=order_item_id)
-    order_item.status = OrderStatus.IN_PRODUCTION.value
-    order_item.additional_status_info = "Item is being processed"
-    order_item.save()
-    order = order_item.batch.order
-    order_type = OrderType(order_item.batch.order.order_type)
-    generic_order_config = utilities.get_generic_order_config(order_type)
-    item_processor = utilities.get_item_processor(order_item)
-    options = order_item.export_options()
-    delivery_options = order_item.export_delivery_options()
     for current_try in itertools.count():
         try:
-            urls, details = item_processor.process_item_online_access(
-                identifier=order_item.identifier,
-                item_id=order_item.item_id,
-                order_id=order.id,
-                user_name=order.user.username,
-                options=options,
-                delivery_options=delivery_options,
-                domain=django_settings.OSEOSERVER_SITE_DOMAIN,
-                sub_uri=django_settings.SITE_SUB_URI
-            )
-            if not any(urls):
-                order_item.status = OrderStatus.FAILED.value
-                raise RuntimeError
-            else:
-                order_item.additional_status_info = details
-                now = datetime.now(pytz.utc)
-                expiry_date = now + timedelta(
-                    days=generic_order_config.get("item_availability_days",1))
-                order_item.status = OrderStatus.COMPLETED.value
-                order_item.completed_on = now
-                for url in urls:
-                    f = models.OseoFile(url=url, available=True,
-                                        order_item=order_item,
-                                        expires_on=expiry_date)
-                    f.save()
-                break   # leave the enclosing for loop
-        except Exception:
-            formatted_tb = traceback.format_exception(*sys.exc_info())
-            error_message = (
-                "Could not process order item {!r} (Attempt {}/{}). The error "
-                "was: {}".format(order_item_id, current_try+1, max_tries,
-                                 formatted_tb)
-            )
-            logger.error(error_message)
-            order_item.status = OrderStatus.FAILED.value
-            order_item.additional_status_info = error_message
-
+            order_item.process()
+            break
+        except Exception as err:
+            error_msg = "{} (Attempt {}/{})".format(
+                str(err),current_try+1, max_tries)
+            logger.error(error_msg)
             if current_try < max_tries:
-                # sleep a bit and then try again, maybe it'll work later
-                logger.info(
-                    "Trying again in {} minutes...".format(sleep_interval/60))
+                waiting_msg = "Trying again in {} minutes...".format(
+                    sleep_interval/60)
+                order_item.additional_status_info = waiting_msg
+                order_item.status = OrderStatus.IN_PRODUCTION.value
+                order_item.save()
+                logger.info(waiting_msg)
                 time.sleep(sleep_interval)
             else: # we won't try anymore, it does not work
-                _send_failed_attempt_email(order, order_item, error_message)
+                _send_failed_attempt_email(order_item.batch.order, order_item,
+                                           error_msg)
                 break  # leave the enclosing for loop
-    order_item.save()
 
 
 def _send_failed_attempt_email(order, order_item, message):
@@ -387,7 +344,6 @@ def _process_batch(batch_id):
 
 def _package_batch(batch, compression):
     item_processor = utilities.get_item_processor(batch.order)
-    domain = django_settings.OSEOSERVER_SITE_DOMAIN
     files_to_package = []
     try:
         for item in batch.order_items.all():
@@ -395,8 +351,8 @@ def _package_batch(batch, compression):
                 files_to_package.append(oseo_file.url)
         packed = item_processor.package_files(
             packaging=compression,
-            domain=domain,
-            site_name=django_settings.SITE_SUB_URI,
+            domain=settings.get_site_domain(),
+            site_name="phony_site_name",
             file_urls=files_to_package,
         )
     except Exception as e:

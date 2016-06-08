@@ -149,8 +149,9 @@ class ExampleOrderProcessor(object):
 
         return dt.datetime.utcnow(), dt.datetime.utcnow()
 
-    def process_item_online_access(identifier, item_id, order_id, user_name,
-                                   packaging, options, delivery_options):
+    def process_item_online_access(self, identifier, item_id, order_id,
+                                   user_name, packaging, options,
+                                   delivery_options):
         """
         Process an item that has been ordered.
 
@@ -158,23 +159,31 @@ class ExampleOrderProcessor(object):
         in multiple output files. For example, a multiband dataset may be
         split into its sub bands.
 
-        :param identifier:
-        :type identifier:
-        :param order_id:
-        :type order_id:
-        :param user_name:
-        :type user_name:
-        :param packaging:
-        :type packaging: bool
-        :param options:
-        :type options: dict()
-        :param delivery_options:
-        :type delivery_options: dict()
-        :return: A list with the URI of the processed item(s) and a
-            string with additional details. Each URI is relative to
-            the url pattern declared in the show_item urlconf entry
-            in oseoserver.urls
-        :rtype: ([string], string)
+        Parameters
+        ----------
+        identifier: str
+            The identifier of the order_item in the catalogue
+        item_id: str
+            Identifier for the order item in the request
+        order_id: int
+            Primary key for the order in the django database
+        user_name: str
+            Name of the user making the request
+        packaging: str
+            Packaging method for the order, if any
+        options: dict
+            Processing options to apply customization on the order item
+        delivery_options: dict
+            Delivery options for the item
+
+        Returns
+        -------
+
+        urls: list
+            URLs of the processed items
+        details: str
+            Additional details
+
         """
 
         logger.debug("fake processing of an order item")

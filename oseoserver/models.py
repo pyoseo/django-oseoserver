@@ -17,8 +17,10 @@ Database models for pyoseo
 """
 
 from __future__ import absolute_import
-from datetime import datetime
+import datetime as dt
 from decimal import Decimal
+import sys
+import traceback
 
 from django.db import models
 
@@ -28,9 +30,9 @@ import pytz
 import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
-#from . import managers
 from . import errors
 from . import settings
+from . import utilities
 from .constants import DeliveryOption
 from .constants import MASSIVE_ORDER_REFERENCE
 from .constants import OrderStatus
@@ -44,6 +46,7 @@ from .utilities import _n
 
 COLLECTION_CHOICES = [(c["name"], c["name"]) for
                       c in settings.get_collections()]
+
 
 class AbstractDeliveryAddress(models.Model):
     first_name = models.CharField(max_length=50, blank=True)
@@ -66,7 +69,7 @@ class AbstractDeliveryAddress(models.Model):
         delivery_address.firstName = _n(self.first_name)
         delivery_address.lastName = _n(self.last_name)
         delivery_address.companyRef = _n(self.company_ref)
-        delivery_address.postalAddress=pyxb.BIND()
+        delivery_address.postalAddress = pyxb.BIND()
         delivery_address.postalAddress.streetAddress = _n(self.street_address)
         delivery_address.postalAddress.city = _n(self.city)
         delivery_address.postalAddress.state = _n(self.state)
@@ -235,8 +238,7 @@ class CustomizableItem(models.Model):
         return instance.__unicode__()
 
     def create_oseo_delivery_options(self):
-        """
-        Create an OSEO DeliveryOptionsType
+        """Create an OSEO DeliveryOptionsType
 
         :arg db_item: the database record model that has the delivery options
         :type db_item: pyoseo.models.CustomizableItem
@@ -255,26 +257,20 @@ class CustomizableItem(models.Model):
             pass
         else:
             pass  # raise some error
-
-
         try:
             do = self.selected_delivery_option
             dot = oseo.DeliveryOptionsType()
-            try:
-                oda = do.option.onlinedataaccess
-                dot.onlineDataAccess = pyxb.BIND()
-                dot.onlineDataAccess.protocol = oda.protocol
-            except OnlineDataAccess.DoesNotExist:
-                try:
-                    odd = do.option.onlinedatadelivery
-                    dot.onlineDataDelivery = pyxb.BIND()
-                    dot.onlineDataDelivery.protocol = odd.protocol
-                except OnlineDataDelivery.DoesNotExist:
-                    md = do.option.mediadelivery
-                    dot.mediaDelivery = pyxb.BIND()
-                    dot.mediaDelivery.packageMedium = md.package_medium
-                    dot.mediaDelivery.shippingInstructions = _n(
-                        md.shipping_instructions)
+            if do.delivery_type == DeliveryOption.ONLINE_DATA_ACCESS.value:
+                dot.onlineDataAccess = pyxb.BIND(protocol=do.delivery_details)
+            elif do.delivery_type == DeliveryOption.ONLINE_DATA_DELIVERY.value:
+                dot.onlineDataDelivery = pyxb.BIND(
+                    protocol=do.delivery_details)
+            elif do.delivery_type == DeliveryOption.MEDIA_DELIVERY.value:
+                medium, _, shipping = do.delivery_details.partition(",")
+                dot.mediaDelivery = pyxb.BIND(
+                    packageMedium=medium,
+                    shippingInstructions=_n(shipping)
+                )
             dot.numberOfCopies = _n(do.copies)
             dot.productAnnotation = _n(do.annotation)
             dot.specialInstructions = _n(do.special_instructions)
@@ -580,10 +576,7 @@ class OrderItem(CustomizableItem):
         return valid_delivery
 
     def create_oseo_status_item_type(self):
-        """
-        Create a CommonOrderStatusItemType element
-        :return:
-        """
+        """Create a CommonOrderStatusItemType element"""
         sit = oseo.CommonOrderStatusItemType()
         # TODO - add the other optional elements
         sit.itemId = str(self.item_id)
@@ -607,6 +600,66 @@ class OrderItem(CustomizableItem):
             _n(self.mission_specific_status_info)
         return sit
 
+    def process(self):
+        """Process the item
+
+        This method will call the external item_processor object's
+        `process_item_online_access` method
+
+        The expected URLs are then used to create new `OseoFile` instances
+
+        """
+
+        self.status = OrderStatus.IN_PRODUCTION.value
+        self.additional_status_info = "Item is being processed"
+        self.save()
+        order = self.batch.order
+        item_processor = utilities.get_item_processor(self)
+        options = self.export_options()
+        delivery_options = self.export_delivery_options()
+        try:
+            urls, details = item_processor.process_item_online_access(
+                identifier=self.identifier, item_id=self.item_id,
+                order_id=order.id, user_name=order.user.username,
+                packaging=order.packaging, options=options,
+                delivery_options=delivery_options
+            )
+            if any(urls):
+                self.additional_status_info = details
+                self.status = OrderStatus.COMPLETED.value
+                now = dt.datetime.now(pytz.utc)
+                self.completed_on = now
+                expiry_date = self._create_expiry_date()
+                for url in urls:
+                    f = OseoFile(url=url, available=True, order_item=self,
+                                 expires_on=expiry_date)
+                    f.save()
+            else:
+                raise errors.OseoServerError(
+                    "The item processor did not return any URLs")
+        except Exception:
+            formatted_tb = traceback.format_exception(*sys.exc_info())
+            error_message = (
+                "Could not process order item {!r}. The error "
+                "was: {}".format(self, formatted_tb)
+            )
+            self.status = OrderStatus.FAILED.value
+            self.additional_status_info = error_message
+            raise errors.OseoServerError(error_message)
+        else:
+            self.status = OrderStatus.COMPLETED.value
+        finally:
+            self.save()
+        return urls, details
+
+    def _create_expiry_date(self):
+        now = dt.datetime.now(pytz.utc)
+        order_type = OrderType(self.batch.order.order_type)
+        generic_order_config = utilities.get_generic_order_config(order_type)
+        expiry_date = now + dt.timedelta(
+            days=generic_order_config.get("item_availability_days",1))
+        return expiry_date
+
     def __unicode__(self):
         return str(self.item_id)
 
@@ -626,7 +679,7 @@ class OseoFile(models.Model):
 
     def can_be_deleted(self):
         result = False
-        now = datetime.now(pytz.utc)
+        now = dt.datetime.now(pytz.utc)
         if self.expires_on < now:
             result = True
         else:

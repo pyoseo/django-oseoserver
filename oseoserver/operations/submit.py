@@ -180,14 +180,18 @@ class Submit(OseoOperation):
                 models.SelectedOption(option=option_name, value=option_value),
                 bulk=False
             )
-
+        if delivery_options["type"] == DeliveryOption.MEDIA_DELIVERY:
+            delivery_details = ",".join(
+                (delivery_options["medium"], delivery_options["shipping"]))
+        else:
+            delivery_details = delivery_options["protocol"].value
         sdo = models.SelectedDeliveryOption(
             customizable_item=order,
             annotation=delivery_options["annotation"],
             copies=delivery_options["copies"],
             special_instructions=delivery_options["special_instructions"],
             delivery_type=delivery_options["type"].value,
-            delivery_details=delivery_options["protocol"].value
+            delivery_details=delivery_details
         )
         sdo.save()
         order.save()

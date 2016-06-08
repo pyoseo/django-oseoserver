@@ -43,7 +43,7 @@ class SelectedSceneSelectionOptionInline(admin.StackedInline):
 
 @admin.register(models.Order)
 class OrderAdmin(admin.ModelAdmin):
-    inlines = (ExtensionInline,)
+    inlines = (ExtensionInline, SelectedDeliveryOptionInline,)
     fieldsets = (
         (None, {
             'fields': ('order_type', 'status', 'status_notification',
