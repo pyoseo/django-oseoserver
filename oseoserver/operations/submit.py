@@ -37,12 +37,11 @@ from ..constants import OrderStatus
 from ..constants import Priority
 from ..constants import MASSIVE_ORDER_REFERENCE
 from ..constants import StatusNotification
-from .base import OseoOperation
 
 logger = logging.getLogger(__name__)
 
 
-class Submit(OseoOperation):
+class Submit(object):
 
     @transaction.atomic
     def __call__(self, request, user):
@@ -57,8 +56,10 @@ class Submit(OseoOperation):
 
         Returns
         -------
-        str
-            The XML response
+        response: oseo.SubmitAck
+            The response SubmitAck instance
+        order: oseoserver.models.Order
+            The created order
 
         """
 
@@ -209,9 +210,9 @@ class Submit(OseoOperation):
         """Determine the collection identifier for the specified item.
 
         This method is used when the requested order item does not provide the
-        optional 'collectionId' element. It instatiates the external item
+        optional 'collectionId' element. It instantiates the external item
         processor class and calls it's `get_collection_id` method, passing the
-        inpurt `item_id` as the sole parameter.
+        input `item_id` as the sole parameter.
 
         Parameters
         ----------

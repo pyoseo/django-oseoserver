@@ -109,24 +109,6 @@ def update_batch(sender, **kwargs):
         batch.completed_on = None
 
 
-@receiver(post_save, sender=models.OseoFile, weak=False,
-          dispatch_uid="id_for_update_item_status")
-def update_item_status(sender, **kwargs):
-    """
-    Update an order item's status when one of its oseo files is downloaded
-
-    This handler checks if all of an order item's oseo_files have already
-    been downloaded and updates the order item's status accordingly.
-    """
-
-    oseo_file = kwargs["instance"]
-    order_item = oseo_file.order_item
-    if (order_item.status != OrderStatus.DOWNLOADED.value and all(
-            [f.downloads > 0 for f in order_item.files.all()])):
-        order_item.status = OrderStatus.DOWNLOADED.value
-        order_item.save()
-
-
 @receiver(signals.order_status_changed, weak=False,
           dispatch_uid='id_for_handle_order_status_change')
 def handle_order_status_change(sender, **kwargs):

@@ -20,11 +20,10 @@ import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from oseoserver import models
 from oseoserver import errors
-from oseoserver.operations.base import OseoOperation
 from oseoserver.server import OseoServer
 
 # TODO - Use the status_notification
-class Cancel(OseoOperation):
+class Cancel(object):
 
     def __call__(self, request, user, **kwargs):
         """Implements the OSEO Cancel operation.

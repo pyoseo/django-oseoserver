@@ -26,12 +26,11 @@ import pyxb.bundles.opengis.ows_2_0 as ows
 
 from .. import server
 from .. import settings
-from .base import OseoOperation
 
 logger = logging.getLogger(__name__)
 
 
-class GetCapabilities(OseoOperation):
+class GetCapabilities(object):
 
     def __call__(self, request, user, **kwargs):
         """Implements the OSEO GetCapabilities operation.
@@ -39,11 +38,19 @@ class GetCapabilities(OseoOperation):
         Please refer to section 8. GetCapabilities operation of the OSEO
         standard for more details on this operation.
 
-        :param request:
-        :param user:
-        :param user_password:
-        :param kwargs:
-        :return:
+        Parameters
+        ----------
+
+        request: oseo.GetCapabilities
+            The incoming request
+        user: django.contrib.auth.User
+            The django user that placed the request
+
+        Returns
+        -------
+        oseo.Capabilities
+            The response Capabilities instance
+
         """
 
         # parse the GetCapabilities request
@@ -54,7 +61,7 @@ class GetCapabilities(OseoOperation):
         caps.OperationsMetadata = self._build_operations_metadata()
         caps.Contents = self._build_contents(user)
         caps.Notifications = self._build_notifications()
-        return caps, None
+        return caps
 
     def _build_service_identification(self):
         return None  # not implemented yet

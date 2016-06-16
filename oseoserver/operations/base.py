@@ -16,12 +16,6 @@
 Base classes for the OSEO operations
 """
 
-from django.core.exceptions import ObjectDoesNotExist
-import pyxb
-import pyxb.bundles.opengis.oseo_1_0 as oseo
-
-from oseoserver import models
-
 class OseoOperation(object):
     """
     This is the base class for OSEO operations.
@@ -29,13 +23,13 @@ class OseoOperation(object):
     It should not be instantiated directly
     """
 
-    def _user_is_authorized(self, user, order):
-        """
-        Test if a user is allowed to check on the status of an order
-        """
+    #def _user_is_authorized(self, user, order):
+    #    """
+    #    Test if a user is allowed to check on the status of an order
+    #    """
 
-        result = False
-        if order.user == user:
-            result = True
-        return result
+    #    result = False
+    #    if order.user == user:
+    #        result = True
+    #    return result
 

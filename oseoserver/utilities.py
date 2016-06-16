@@ -20,7 +20,7 @@ import importlib
 import logging
 
 from django.conf import settings as django_settings
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.core.urlresolvers import reverse
 from django.template.loader import render_to_string
 
@@ -211,7 +211,8 @@ def send_moderation_email(order):
     msg = render_to_string(template, context)
     subject = "Copernicus Global Land Service - {} {} awaits " \
               "moderation".format(order.order_type, order.id)
-    recipients = User.objects.filter(is_staff=True).exclude(email="")
+    UserModel = get_user_model()
+    recipients = UserModel.objects.filter(is_staff=True).exclude(email="")
     send_email(subject, msg, recipients, html=True)
 
 
@@ -221,20 +222,22 @@ def send_cleaning_error_email(order_type, file_paths, error):
            "files:\n\n{}\n\nThe error was:\n\n{}".format(order_type.name,
                                                          details,
                                                          error))
+    UserModel = get_user_model()
     send_email(
         "Error deleting expired files",
         msg,
-        User.objects.filter(is_staff=True).exclude(email="")
+        UserModel.objects.filter(is_staff=True).exclude(email="")
     )
 
 
 def send_batch_packaging_failed_email(batch, error):
     msg = ("There has been an error packaging batch {}. The error "
           "was:\n\n\{}".format(batch, error))
+    UserModel = get_user_model()
     send_email(
         "Error packaging batch {}".format(batch),
         msg,
-        User.objects.filter(is_staff=True).exclude(email="")
+        UserModel.objects.filter(is_staff=True).exclude(email="")
     )
 
 
@@ -296,7 +299,32 @@ def send_product_batch_available_email(batch):
     send_email(subject, msg, recipients, html=True)
 
 
+def send_failed_attempt_email(order_id, item_id, message):
+    full_message = "Order: {}\n\tOrderItem: {}\n\n\t".format(
+        order_id, item_id)
+    full_message += message
+    subject = ("Copernicus Global Land Service - Unsuccessful processing "
+               "attempt")
+    UserModel = get_user_model()
+    recipients = UserModel.objects.filter(is_staff=True).exclude(email="")
+    send_email(subject, full_message, recipients, html=True)
+
+
 def send_email(subject, message, recipients, html=False, attachments=None):
+    """Send emails
+
+    Parameters
+    ----------
+    subject: str
+        The subject of the email
+    message: str
+        Body of the email
+    recipients: list
+        An iterable with django users representing the recipients of the email
+    html: bool, optional
+        Whether the e-mail should be sent in HTML or plain text
+    """
+
     already_emailed = []
     for recipient in recipients:
         address = recipient.email

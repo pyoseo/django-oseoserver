@@ -21,13 +21,13 @@ import datetime as dt
 from decimal import Decimal
 import sys
 import traceback
+import logging
 
 from django.db import models
-
 from django.core.exceptions import ObjectDoesNotExist
 from django.conf import settings as django_settings
 import pytz
-import pyxb
+from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from . import errors
@@ -43,6 +43,8 @@ from .constants import Priority
 from .constants import StatusNotification
 from .utilities import _n
 
+
+logger = logging.getLogger(__name__)
 
 COLLECTION_CHOICES = [(c["name"], c["name"]) for
                       c in settings.get_collections()]
@@ -69,7 +71,7 @@ class AbstractDeliveryAddress(models.Model):
         delivery_address.firstName = _n(self.first_name)
         delivery_address.lastName = _n(self.last_name)
         delivery_address.companyRef = _n(self.company_ref)
-        delivery_address.postalAddress = pyxb.BIND()
+        delivery_address.postalAddress = BIND()
         delivery_address.postalAddress.streetAddress = _n(self.street_address)
         delivery_address.postalAddress.city = _n(self.city)
         delivery_address.postalAddress.state = _n(self.state)
@@ -238,44 +240,31 @@ class CustomizableItem(models.Model):
         return instance.__unicode__()
 
     def create_oseo_delivery_options(self):
-        """Create an OSEO DeliveryOptionsType
+        """Create an OSEO DeliveryOptionsType"""
 
-        :arg db_item: the database record model that has the delivery options
-        :type db_item: pyoseo.models.CustomizableItem
-        :return: A pyxb object with the delivery options
-        """
-
-        do = self.selected_delivery_option
-        dot = oseo.DeliveryOptionsType()
-        if do == DeliveryOption.ONLINE_DATA_ACCESS.value:
-            dot.onlineDataAccess = pyxb.BIND()
-            dot.onlineDataAccess.protocol = do.protocol
-            pass
-        elif do == DeliveryOption.ONLINE_DATA_DELIVERY.value:
-            pass
-        elif do == DeliveryOption.MEDIA_DELIVERY.value:
-            pass
-        else:
-            pass  # raise some error
         try:
             do = self.selected_delivery_option
+        except SelectedDeliveryOption.DoesNotExist:
+            dot = None
+        else:
             dot = oseo.DeliveryOptionsType()
             if do.delivery_type == DeliveryOption.ONLINE_DATA_ACCESS.value:
-                dot.onlineDataAccess = pyxb.BIND(protocol=do.delivery_details)
+                dot.onlineDataAccess = BIND(protocol=do.delivery_details)
             elif do.delivery_type == DeliveryOption.ONLINE_DATA_DELIVERY.value:
-                dot.onlineDataDelivery = pyxb.BIND(
+                dot.onlineDataDelivery = BIND(
                     protocol=do.delivery_details)
             elif do.delivery_type == DeliveryOption.MEDIA_DELIVERY.value:
                 medium, _, shipping = do.delivery_details.partition(",")
-                dot.mediaDelivery = pyxb.BIND(
+                dot.mediaDelivery = BIND(
                     packageMedium=medium,
                     shippingInstructions=_n(shipping)
                 )
+            else:
+                raise ValueError("Invalid delivery_type: "
+                                 "{}".format(do.delivery_type))
             dot.numberOfCopies = _n(do.copies)
             dot.productAnnotation = _n(do.annotation)
             dot.specialInstructions = _n(do.special_instructions)
-        except SelectedDeliveryOption.DoesNotExist:
-            dot = None
         return dot
 
 
@@ -306,7 +295,7 @@ class DeliveryInformation(AbstractDeliveryAddress):
             del_info.mailAddress.firstName = _n(self.first_name)
             del_info.mailAddress.lastName = _n(self.last_name)
             del_info.mailAddress.companyRef = _n(self.company_ref)
-            del_info.mailAddress.postalAddress = pyxb.BIND()
+            del_info.mailAddress.postalAddress = BIND()
             del_info.mailAddress.postalAddress.streetAddress = _n(self.street_address)
             del_info.mailAddress.postalAddress.city = _n(self.city)
             del_info.mailAddress.postalAddress.state = _n(self.state)
@@ -535,12 +524,28 @@ class OrderItem(CustomizableItem):
         max_length=255,
         choices=COLLECTION_CHOICES
     )
-    identifier = models.CharField(max_length=255, blank=True,
-                                  help_text="identifier for this order item. "
-                                            "It is the product Id in the "
-                                            "catalog")
-    item_id = models.CharField(max_length=80, help_text="Id for the item in "
-                                                        "the order request")
+    identifier = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="identifier for this order item. It is the product Id in "
+                  "the catalog"
+    )
+    item_id = models.CharField(
+        max_length=80,
+        help_text="Id for the item in the order request"
+    )
+    url = models.CharField(
+        max_length=255,
+        help_text="URL where this item is available",
+        blank=True
+    )
+    expires_on = models.DateTimeField(null=True, blank=True)
+    last_downloaded_at = models.DateTimeField(null=True, blank=True)
+    available = models.BooleanField(default=False)
+    downloads = models.SmallIntegerField(
+        default=0,
+        help_text="Number of times this order item has been downloaded."
+    )
 
     def export_options(self):
         valid_options = dict()
@@ -606,8 +611,6 @@ class OrderItem(CustomizableItem):
         This method will call the external item_processor object's
         `process_item_online_access` method
 
-        The expected URLs are then used to create new `OseoFile` instances
-
         """
 
         self.status = OrderStatus.IN_PRODUCTION.value
@@ -617,26 +620,18 @@ class OrderItem(CustomizableItem):
         item_processor = utilities.get_item_processor(self)
         options = self.export_options()
         delivery_options = self.export_delivery_options()
+        processor_options = options.copy()
+        processor_options.update(delivery_options)
+        logger.debug("processor_options: {}".format(processor_options))
         try:
-            urls, details = item_processor.process_item_online_access(
-                identifier=self.identifier, item_id=self.item_id,
-                order_id=order.id, user_name=order.user.username,
-                packaging=order.packaging, options=options,
-                delivery_options=delivery_options
+            url, output_path = item_processor.process_item_online_access(
+                identifier=self.identifier,
+                item_id=self.item_id,
+                order_id=order.id,
+                user_name=order.user.username,
+                packaging=order.packaging,
+                **processor_options
             )
-            if any(urls):
-                self.additional_status_info = details
-                self.status = OrderStatus.COMPLETED.value
-                now = dt.datetime.now(pytz.utc)
-                self.completed_on = now
-                expiry_date = self._create_expiry_date()
-                for url in urls:
-                    f = OseoFile(url=url, available=True, order_item=self,
-                                 expires_on=expiry_date)
-                    f.save()
-            else:
-                raise errors.OseoServerError(
-                    "The item processor did not return any URLs")
         except Exception:
             formatted_tb = traceback.format_exception(*sys.exc_info())
             error_message = (
@@ -648,9 +643,26 @@ class OrderItem(CustomizableItem):
             raise errors.OseoServerError(error_message)
         else:
             self.status = OrderStatus.COMPLETED.value
+            self.additional_status_info = "Item processed"
+            now = dt.datetime.now(pytz.utc)
+            self.url = url
+            self.completed_on = now
+            self.available = True
+            self.expires_on = self._create_expiry_date()
         finally:
             self.save()
-        return urls, details
+        return url, output_path
+
+    def can_be_deleted(self):
+        result = False
+        now = dt.datetime.now(pytz.utc)
+        if self.expires_on < now:
+            result = True
+        else:
+            user = self.order_item.batch.order.user
+            if self.downloads > 0 and user.delete_downloaded_files:
+                result = True
+        return result
 
     def _create_expiry_date(self):
         now = dt.datetime.now(pytz.utc)
@@ -664,32 +676,32 @@ class OrderItem(CustomizableItem):
         return str(self.item_id)
 
 
-class OseoFile(models.Model):
-    order_item = models.ForeignKey("OrderItem", related_name="files")
-    created_on = models.DateTimeField(auto_now_add=True)
-    url = models.CharField(max_length=255, help_text="URL where this file "
-                                                     "is available")
-    expires_on = models.DateTimeField(null=True, blank=True)
-    last_downloaded_at = models.DateTimeField(null=True, blank=True)
-    available = models.BooleanField(default=False)
-    downloads = models.SmallIntegerField(default=0,
-                                         help_text="Number of times this "
-                                                   "order item has been "
-                                                   "downloaded.")
-
-    def can_be_deleted(self):
-        result = False
-        now = dt.datetime.now(pytz.utc)
-        if self.expires_on < now:
-            result = True
-        else:
-            user = self.order_item.batch.order.user
-            if self.downloads > 0 and user.delete_downloaded_files:
-                result = True
-        return result
-
-    def __unicode__(self):
-        return self.url
+#class OseoFile(models.Model):
+#    order_item = models.ForeignKey("OrderItem", related_name="files")
+#    created_on = models.DateTimeField(auto_now_add=True)
+#    url = models.CharField(max_length=255, help_text="URL where this file "
+#                                                     "is available")
+#    expires_on = models.DateTimeField(null=True, blank=True)
+#    last_downloaded_at = models.DateTimeField(null=True, blank=True)
+#    available = models.BooleanField(default=False)
+#    downloads = models.SmallIntegerField(default=0,
+#                                         help_text="Number of times this "
+#                                                   "order item has been "
+#                                                   "downloaded.")
+#
+#    def can_be_deleted(self):
+#        result = False
+#        now = dt.datetime.now(pytz.utc)
+#        if self.expires_on < now:
+#            result = True
+#        else:
+#            user = self.order_item.batch.order.user
+#            if self.downloads > 0 and user.delete_downloaded_files:
+#                result = True
+#        return result
+#
+#    def __unicode__(self):
+#        return self.url
 
 
 class SelectedOption(models.Model):

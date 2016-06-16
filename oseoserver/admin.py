@@ -8,12 +8,12 @@ from . import models
 from .server import OseoServer
 
 
-class OseoFileInline(admin.StackedInline):
-    model = models.OseoFile
-    extra = 1
-
-    def has_add_permission(self, request):
-        return False
+#class OseoFileInline(admin.StackedInline):
+#    model = models.OseoFile
+#    extra = 1
+#
+#    def has_add_permission(self, request):
+#        return False
 
 
 class SelectedOptionInline(admin.StackedInline):
@@ -58,7 +58,7 @@ class OrderAdmin(admin.ModelAdmin):
     )
     list_display = ('id', 'order_type', 'status', 'status_changed_on', 'user',
                     'show_batches',)
-    list_filter = ('status', 'user',)
+    list_filter = ('status', 'user', 'order_type',)
     readonly_fields = ('status_changed_on', 'completed_on',
                        'last_describe_result_access_request',)
     date_hierarchy = 'created_on'
@@ -98,31 +98,32 @@ class PendingOrderAdmin(admin.ModelAdmin):
     reject_order.short_description = "Reject selected orders"
 
 
-@admin.register(models.ProductOrder)
-class ProductOrderAdmin(admin.ModelAdmin):
-    list_display = ("id", "status", "user",)
+#@admin.register(models.ProductOrder)
+#class ProductOrderAdmin(admin.ModelAdmin):
+#    list_display = ("id", "status", "user",)
 
 
-@admin.register(models.SubscriptionOrder)
-class SubscriptionOrderAdmin(admin.ModelAdmin):
-    list_display = ("id", "status", "user",)
+#@admin.register(models.SubscriptionOrder)
+#class SubscriptionOrderAdmin(admin.ModelAdmin):
+#    list_display = ("id", "status", "user",)
 
 
 @admin.register(models.OrderItem)
 class OrderItemAdmin(admin.ModelAdmin):
     inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,
                SelectedPaymentOptionInline,
-               SelectedSceneSelectionOptionInline,
-               OseoFileInline,)
+               SelectedSceneSelectionOptionInline,)
+               #OseoFileInline,)
     fieldsets = (
         (None, {
             'fields': ('item_id', 'batch', 'status',
-                       'status_changed_on', 'completed_on',
-                       'identifier', 'collection',)
+                       'available', 'status_changed_on',
+                       'completed_on', 'identifier', 'collection',)
         }),
         ('Further info', {
             'classes': ('collapse',),
-            'fields': ('remark',
+            'fields': ('expires_on', 'downloads', 'last_downloaded_at',
+                       'url', 'remark',
                        'additional_status_info',
                        'mission_specific_status_info')
         }),

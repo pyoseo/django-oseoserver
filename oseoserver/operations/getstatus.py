@@ -16,40 +16,46 @@
 Implements the OSEO GetStatus operation
 """
 
+from __future__ import absolute_import
 import re
 import datetime as dt
 
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
-from oseoserver import models
-from oseoserver import errors
-from oseoserver.operations.base import OseoOperation
+from .. import models
+from .. import errors
+from .. import constants
 
 
-class GetStatus(OseoOperation):
+class GetStatus(object):
 
     SUCCESS = "success"
-    FULL_PRESENTATION = "full"
 
-    def __call__(self, request, user, **kwargs):
+    def __call__(self, request, user):
         """Implements the OSEO Getstatus operation.
 
         See section 14 of the OSEO specification for details on the
         Getstatus operation.
 
-        :arg request: The instance with the request parameters
-        :type request: pyxb.bundles.opengis.raw.oseo.GetStatusRequestType
-        :arg user: User making the request
-        :type user: oseoserver.models.OseoUser
-        :return: The XML response object
-        :rtype: str
+        Parameters
+        ----------
+        request: oseo.GetStatus
+            The incoming request
+        user: django.contrib.auth.User
+            The django user that placed the request
+
+        Returns
+        -------
+        oseo.GetStatusResponse
+            The response GetStatusResponse instance
+
         """
 
         records = []
         if request.orderId is not None:  # 'order retrieve' type of request
             try:
                 order = models.Order.objects.get(id=int(request.orderId))
-                if self._user_is_authorized(user, order):
+                if order.user == user:
                     records.append(order)
                 else:
                     raise errors.OseoError('AuthorizationFailed',
@@ -61,10 +67,17 @@ class GetStatus(OseoOperation):
                                        'Invalid value for order',
                                        locator=request.orderId)
         else:  # 'order search' type of request
-            records = self._find_orders(request, user)
+            records = self._find_orders(
+                user,
+                last_update=request.filteringCriteria.lastUpdate,
+                last_update_end=request.filteringCriteria.lastUpdateEnd,
+                statuses=[constants.OrderStatus(s) for s in
+                          request.filteringCriteria.orderStatus],
+                order_reference=request.filteringCriteria.orderReference
+            )
         response = self._generate_get_status_response(records,
                                                       request.presentation)
-        return response, None
+        return response
 
     def _generate_get_status_response(self, records, presentation):
         """
@@ -78,34 +91,56 @@ class GetStatus(OseoOperation):
 
         response = oseo.GetStatusResponse()
         response.status = self.SUCCESS
-        for r in records:
-            om = r.create_oseo_order_monitor(presentation)
+        for record in records:
+            om = record.create_oseo_order_monitor(presentation)
             response.orderMonitorSpecification.append(om)
         return response
 
-    def _find_orders(self, request, user):
-        """
-        Find orders that match the request's filtering criteria
+    def _find_orders(self, user, last_update=None, last_update_end=None,
+                     statuses=None, order_reference=None):
+        """Find orders that match the request's filtering criteria
+
+        Parameters
+        ----------
+        user: django.contrib.auth.models.User
+            The user that made the request
+        last_update: datetime.datetime, optional
+            Consider only orders that have been updated since the last time
+            a GetStatus request has been received
+        last_update_end: datetime.datetime or str, optional
+            Consider only orders that have not been updated since the
+            last time a GetStatus request has been received
+        statuses: list, optional
+            Only return orders whose status is in the provided list. The list
+            contents should be elements of the
+            `oseoserver.constants.OrderStatus` enumeration
+        order_reference: str
+            Only return orders that have the input order_reference
+
+        Returns
+        -------
+        django queryset:
+            The orders that match the requested filtering criteria
+
         """
 
-        records = models.Order.objects.filter(user=user)
-        if request.filteringCriteria.lastUpdate is not None:
-            lu = request.filteringCriteria.lastUpdate
-            records = records.filter(status_changed_on__gte=lu)
-        if request.filteringCriteria.lastUpdateEnd is not None:
-            # workaround for a bug in the oseo.xsd that does not
-            # assign a dateTime type to the lastUpdateEnd element
-            lue = request.filteringCriteria.lastUpdateEnd.toxml()
-            m = re.search(r'\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?', lue)
-            try:
-                ts = dt.datetime.strptime(m.group(), '%Y-%m-%dT%H:%M:%SZ')
-            except ValueError:
-                ts = dt.datetime.strptime(m.group(), '%Y-%m-%d')
-            records = records.filter(status_changed_on__lte=ts)
-        if request.filteringCriteria.orderReference is not None:
-            ref = request.filteringCriteria.orderReference
-            records = records.filter(reference=ref)
-        statuses = [s for s in request.filteringCriteria.orderStatus]
-        if any(statuses):
-            records = records.filter(status__in=statuses)
-        return records
+        records_qs = models.Order.objects.filter(user=user)
+        if last_update is not None:
+            records_qs = records_qs.filter(status_changed_on__gte=last_update)
+        if last_update_end is not None:
+            if not isinstance(last_update_end, dt.datetime):
+                m = re.search(r'\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?',
+                              last_update_end)
+                try:
+                    ts = dt.datetime.strptime(m.group(), '%Y-%m-%dT%H:%M:%SZ')
+                except ValueError:
+                    ts = dt.datetime.strptime(m.group(), '%Y-%m-%d')
+            else:
+                ts = last_update_end
+            records_qs = records_qs.filter(status_changed_on_lte=ts)
+        if order_reference is not None:
+            records_qs = records_qs.filter(reference=order_reference)
+        if any(statuses or []):
+            records_qs = records_qs.filter(
+                status__in=[s.value for s in statuses])
+        return records_qs

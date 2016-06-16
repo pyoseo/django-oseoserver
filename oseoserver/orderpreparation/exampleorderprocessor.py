@@ -39,31 +39,19 @@ logger = logging.getLogger(__name__)
 
 class ExampleOrderProcessor(object):
 
-    def __init__(self, **kwargs):
-        pass
+    def clean_files(self, *file_urls):
+        """
+        Delete the files that match the input file_urls from the filesystem.
 
-    def parse_option(self, name, value):
-        """Parse an option and extract its value.
+        This method has the responsability of finding the files that are
+        represented by each file_url and deleting them.
 
-        This method will be called by oseoserver for each selected...
-
-        The example shown here simply extracts the text content of the input
-        `value`
-
-        Parameters
-        ----------
-        name: str
-            The name or the option being parsed
-        value: lxml.etree._Element
-
-        Returns
-        -------
-        str
-            The parsed value
+        :param file_urls: A sequence containing file URLs
+        :type file_urls: [str]
+        :return: Nothing
         """
 
-        parsed_value = value.text
-        return parsed_value
+        pass
 
     def get_collection_id(self, item_id):
         """Determine the collection identifier for the specified item.
@@ -149,51 +137,6 @@ class ExampleOrderProcessor(object):
 
         return dt.datetime.utcnow(), dt.datetime.utcnow()
 
-    def process_item_online_access(self, identifier, item_id, order_id,
-                                   user_name, packaging, options,
-                                   delivery_options):
-        """
-        Process an item that has been ordered.
-
-        According to the selected options, a single item can in fact result
-        in multiple output files. For example, a multiband dataset may be
-        split into its sub bands.
-
-        Parameters
-        ----------
-        identifier: str
-            The identifier of the order_item in the catalogue
-        item_id: str
-            Identifier for the order item in the request
-        order_id: int
-            Primary key for the order in the django database
-        user_name: str
-            Name of the user making the request
-        packaging: str
-            Packaging method for the order, if any
-        options: dict
-            Processing options to apply customization on the order item
-        delivery_options: dict
-            Delivery options for the item
-
-        Returns
-        -------
-
-        urls: list
-            URLs of the processed items
-        details: str
-            Additional details
-
-        """
-
-        logger.debug("fake processing of an order item")
-        logger.debug("arguments: {}".format(locals()))
-        #file_name = None
-        #details = "The item failed because this is a fake processor"
-        file_name = "fakeorder"
-        details = "Pretending to be a file"
-        return [file_name], details
-
     def package_files(self, packaging, domain, delete_paths=True,
                       site_name=None, server_port=None, file_urls=[],
                       **kwargs):
@@ -213,18 +156,80 @@ class ExampleOrderProcessor(object):
         output_url = "fake_url_for_the_package"
         return output_url
 
-    def clean_files(self, file_urls=[], **kwargs):
+    def parse_option(self, name, value):
+        """Parse an option and extract its value.
+
+        This method will be called by oseoserver for each selected...
+
+        The example shown here simply extracts the text content of the input
+        `value`
+
+        Parameters
+        ----------
+        name: str
+            The name or the option being parsed
+        value: lxml.etree._Element
+
+        Returns
+        -------
+        str
+            The parsed value
         """
-        Delete the files that match the input file_urls from the filesystem.
 
-        This method has the responsability of finding the files that are
-        represented by each file_url and deleting them.
+        parsed_value = value.text
+        return parsed_value
 
-        :param file_urls: A sequence containing file URLs
-        :type file_urls: [str]
-        :param kwargs:
-        :return: Nothing
+    def process_item_online_access(self, identifier, item_id, order_id,
+                                   user_name, packaging,
+                                   special_instructions=None,
+                                   annotation=None,
+                                   copies=None,
+                                   protocol=None,
+                                   delivery_type=None,
+                                   **kwargs):
+        """
+        Process an item that has been ordered.
+
+        According to the selected options, a single item can in fact result
+        in multiple output files. For example, a multiband dataset may be
+        split into its sub bands.
+
+        Parameters
+        ----------
+        identifier: str
+            The identifier of the order_item in the catalogue
+        item_id: str
+            Identifier for the order item in the request
+        order_id: int
+            Primary key for the order in the django database
+        user_name: str
+            Name of the user making the request
+        packaging: str
+            Packaging method for the order, if any
+        special_instructions: str, optional
+            Additional distribution instructions
+        annotation: str, optional
+            Additional distribution instructions
+        copies: int, optional
+            How many copies of each item shall be produced
+        protocol: str, optional
+            What protocol to use for distribution
+        delivery_type: str, optional
+            What delivery type has been selected
+        kwargs: dict
+            Additional processing options
+
+        Returns
+        -------
+
+        url: str
+            URL where the file may be accessed
+        output_path: str
+            Path to the file in the local filesystem
+
         """
 
-        pass
+        logger.debug("fake processing of an order item")
+        logger.debug("arguments: {}".format(locals()))
+        return "http://fakeurl.com", "/phony/location"
 

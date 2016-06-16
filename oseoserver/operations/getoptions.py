@@ -26,13 +26,12 @@ import pyxb.bundles.opengis.swe_2_0 as swe
 from oseoserver import models
 from oseoserver import errors
 from oseoserver.utilities import _n
-from oseoserver.operations.base import OseoOperation
 
 logger = logging.getLogger(__name__)
 
 
 # TODO - Implement retrieval of options for subscription orders
-class GetOptions(OseoOperation):
+class GetOptions(object):
 
     def __call__(self, request, user, **kwargs):
         """

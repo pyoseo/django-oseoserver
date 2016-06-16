@@ -25,11 +25,10 @@ import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from oseoserver import models
 from oseoserver import errors
-from oseoserver.operations.base import OseoOperation
 
 logger = logging.getLogger(__name__)
 
-class DescribeResultAccess(OseoOperation):
+class DescribeResultAccess(object):
 
     def __call__(self, request, user, **kwargs):
         """Implements the OSEO DescribeResultAccess operation.

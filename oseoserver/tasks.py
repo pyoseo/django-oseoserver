@@ -60,11 +60,15 @@ logger = get_task_logger(__name__)
 
 @shared_task(bind=True)
 def process_product_order(self, order_id):
-    """
-    Process a product order.
+    """Process a product order.
 
-    :arg order_id:
-    :type order_id: int
+    Parameters
+    ----------
+
+    order_id: int
+        The primary key of the order in django's database. This is used to
+        retrieve order information at the time of processing.
+
     """
 
     try:
@@ -97,7 +101,17 @@ def process_subscription_order_batch(self, batch_id, notify_user=True):
 
 @shared_task(bind=True)
 def process_product_order_batch(self, batch_id, notify_user=False):
-    """Process a normal product order batch."""
+    """Process a normal product order batch.
+
+    Parameters
+    ----------
+    batch_id: int
+        Django database identifier of the batch so that it can be retrieved
+        at processing time
+    notify_user: bool
+        Whether the user that placed the order should be notified
+
+    """
 
     celery_group = _process_batch(batch_id)
     batch = models.Batch.objects.get(pk=batch_id)
@@ -133,7 +147,7 @@ def process_online_data_access_item(self, order_item_id, max_tries=3,
     Parameters
     ----------
     order_item_id: int
-        The primarykey value of the order item in the database
+        The primary key value of the order item in the database
     max_tries: int, optional
         How many times should the processing be retried, in case it fails
     sleep_interval: int, optional
@@ -160,19 +174,9 @@ def process_online_data_access_item(self, order_item_id, max_tries=3,
                 logger.info(waiting_msg)
                 time.sleep(sleep_interval)
             else: # we won't try anymore, it does not work
-                _send_failed_attempt_email(order_item.batch.order, order_item,
-                                           error_msg)
+                utilities.send_failed_attempt_email(order_item.batch.order.id,
+                                                    order_item.id, error_msg)
                 break  # leave the enclosing for loop
-
-
-def _send_failed_attempt_email(order, order_item, message):
-    full_message = "Order: {}\n\tOrderItem: {}\n\n\t".format(
-        order.id, order_item.id)
-    full_message += message
-    subject = ("Copernicus Global Land Service - Unsuccessful processing "
-               "attempt")
-    recipients = User.objects.filter(is_staff=True).exclude(email="")
-    utilities.send_email(subject, full_message, recipients, html=True)
 
 
 @shared_task(bind=True)

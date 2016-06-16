@@ -112,14 +112,17 @@ class OseoServer(object):
 
         schema_instance = self.parse_xml(request_data)
         operation, op_name = self._get_operation(schema_instance)
-        response, order = operation(schema_instance, user)
+        result = operation(schema_instance, user)
         if op_name == "Submit":
+            response, order = result
             if order.status == constants.OrderStatus.SUBMITTED:
                 utilities.send_moderation_email(order)
             else:
                 order_type = constants.OrderType(order.order_type)
                 if order_type == constants.OrderType.PRODUCT_ORDER:
                     self.dispatch_product_order(order)
+        else:
+            response = result
         response_element = etree.fromstring(response.toxml(
             encoding=constants.ENCODING))
         return response_element

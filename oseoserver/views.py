@@ -38,70 +38,67 @@ def oseo_endpoint(request):
 
     """
 
-    if request.method == 'POST':  # OSEO requests are always POST
-        server = OseoServer()
-        headers = {}
-        try:
-            request_element = etree.fromstring(request.body)
-            soap_version = soap.get_soap_version(request_element)
-        except (errors.InvalidSoapVersionError, etree.XMLSyntaxError):
-            django_response = HttpResponseBadRequest()
-        else:
-            try:
-                headers = soap.get_http_headers(soap_version)
-                details = soap.unwrap_request(request_element)
-                request_data, username, password, password_attributes = details
-                logger.debug("username: {}".format(username))
-                logger.debug("password: {}".format(password))
-                logger.debug(
-                    "password_attributes: {}".format(password_attributes))
-                user = authenticate(username=username, password=password)
-                logger.debug("user: {}".format(user))
-                if user is None or not user.is_active:
-                    raise errors.OseoError(
-                        code="AuthenticationFailed",
-                        text="Invalid or missing identity information"
-                    )
-                # TODO: Add permissions for what a user is allowed to do
+    if not request.method == "POST":  # OSEO requests must always be POST
+        return HttpResponseForbidden()
 
-                process_response = server.process_request(request_data, user)
-                status_code = 200
-                if soap_version is None:
-                    response = process_response
-                else:
-                    response = soap.wrap_response(process_response,
-                                                  soap_version)
-            except errors.OseoError as err:
-                if err.code == "AuthorizationFailed":
-                    status_code = 401
-                else:
-                    status_code = 400
-                exception_report = server.create_exception_report(
-                    err.code, err.text, err.locator)
-                if soap_version is None:
-                    response = exception_report
-                else:
-                    soap_fault_code = soap.get_soap_fault_code(err.code)
-                    response = soap.wrap_soap_fault(
-                        exception_element=exception_report,
-                        soap_code=soap_fault_code,
-                        soap_version=soap_version
-                    )
-                signals.invalid_request.send_robust(
-                    sender=__name__,
-                    request_data=request.body,
-                    exception_report=exception_report
-                )
-            except errors.ServerError:
-                raise
-            serialized = etree.tostring(response, encoding=ENCODING,
-                                        pretty_print=True)
-            django_response = HttpResponse(serialized)
-            django_response.status_code = status_code
-            for k, v in headers.items():
-                django_response[k] = v
+    server = OseoServer()
+    headers = {}
+    try:
+        request_element = etree.fromstring(request.body)
+        soap_version = soap.get_soap_version(request_element)
+    except (errors.InvalidSoapVersionError, etree.XMLSyntaxError):
+        django_response = HttpResponseBadRequest()
     else:
-        django_response = HttpResponseForbidden()
+        try:
+            headers = soap.get_http_headers(soap_version)
+            details = soap.unwrap_request(request_element)
+            request_data, username, password, password_attributes = details
+            user = authenticate(username=username, password=password,
+                                password_attributes=password_attributes)
+            logger.debug("user: {}".format(user))
+            if user is None or not user.is_active:
+                raise errors.OseoError(
+                    code="AuthenticationFailed",
+                    text="Invalid or missing identity information"
+                )
+            # TODO: Add permissions for what a user is allowed to do
+
+            process_response = server.process_request(request_data, user)
+            status_code = 200
+            if soap_version is None:
+                response = process_response
+            else:
+                response = soap.wrap_response(process_response,
+                                              soap_version)
+        except errors.OseoError as err:
+            if err.code == "AuthorizationFailed":
+                status_code = 401
+            else:
+                status_code = 400
+            exception_report = server.create_exception_report(
+                err.code, err.text, err.locator)
+            if soap_version is None:
+                response = exception_report
+            else:
+                soap_fault_code = soap.get_soap_fault_code(err.code)
+                response = soap.wrap_soap_fault(
+                    exception_element=exception_report,
+                    soap_code=soap_fault_code,
+                    soap_version=soap_version
+                )
+            signals.invalid_request.send_robust(
+                sender=__name__,
+                request_data=request.body,
+                exception_report=exception_report
+            )
+        except errors.ServerError:
+            raise
+        serialized = etree.tostring(response, encoding=ENCODING,
+                                    pretty_print=True)
+        django_response = HttpResponse(serialized)
+        django_response.status_code = status_code
+        for k, v in headers.items():
+            django_response[k] = v
     return django_response
 
 
