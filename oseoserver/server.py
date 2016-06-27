@@ -192,8 +192,8 @@ class OseoServer(object):
         status = (constants.OrderStatus.ACCEPTED if force
                   else constants.OrderStatus(order.status))
         if status == constants.OrderStatus.ACCEPTED:
-            logger.debug("Sending order {} to processing queue...".format(
-                order.id))
+            logger.debug("Sending order {0.id} to processing queue...".format(
+                order))
             tasks.process_product_order.apply_async((order.id,))
 
     # the code that checks the value of the email notification extension

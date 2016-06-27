@@ -61,8 +61,7 @@ def oseo_endpoint(request):
                     code="AuthenticationFailed",
                     text="Invalid or missing identity information"
                 )
-            # TODO: Add permissions for what a user is allowed to do
-
+            # TODO: Add authorization controls
             process_response = server.process_request(request_data, user)
             status_code = 200
             if soap_version is None:

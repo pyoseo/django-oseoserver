@@ -37,22 +37,16 @@ And the flower monitoring tool can be started with:
 from __future__ import division
 from __future__ import absolute_import
 from datetime import datetime, timedelta
-import itertools
-import sys
-import time
-import traceback
 
 from celery import shared_task
-from celery import group, chord, chain
+from celery import group, chain
 from celery.utils.log import get_task_logger
-from django.contrib.auth.models import User
 import pytz
 
 from . import models
 from . import utilities
 from . import settings
 from .constants import OrderStatus
-from .constants import OrderType
 from .constants import DeliveryOption
 
 logger = get_task_logger(__name__)
@@ -139,7 +133,11 @@ def notify_user_product_batch_available(self, batch_id):
     utilities.send_product_batch_available_email(batch)
 
 
-@shared_task(bind=True)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=20,
+)
 def process_online_data_access_item(self, order_item_id, max_tries=3,
                                     sleep_interval=10):
     """Process order items that specify online data access as delivery.
@@ -157,26 +155,10 @@ def process_online_data_access_item(self, order_item_id, max_tries=3,
     """
 
     order_item = models.OrderItem.objects.get(pk=order_item_id)
-    for current_try in itertools.count():
-        try:
-            order_item.process()
-            break
-        except Exception as err:
-            error_msg = "{} (Attempt {}/{})".format(
-                str(err),current_try+1, max_tries)
-            logger.error(error_msg)
-            if current_try < max_tries:
-                waiting_msg = "Trying again in {} minutes...".format(
-                    sleep_interval/60)
-                order_item.additional_status_info = waiting_msg
-                order_item.status = OrderStatus.IN_PRODUCTION.value
-                order_item.save()
-                logger.info(waiting_msg)
-                time.sleep(sleep_interval)
-            else: # we won't try anymore, it does not work
-                utilities.send_failed_attempt_email(order_item.batch.order.id,
-                                                    order_item.id, error_msg)
-                break  # leave the enclosing for loop
+    try:
+        order_item.process()
+    except Exception as err:
+        self.retry(exc=err)
 
 
 @shared_task(bind=True)
