@@ -46,8 +46,11 @@ from .utilities import _n
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_CHOICES = [(c["name"], c["name"]) for
-                      c in settings.get_collections()]
+COLLECTION_CHOICES = [
+    (c["name"], c["name"]) for c in settings.get_collections()]
+
+STATUS_CHOICES = [
+    (status.value, status.value) for status in OrderStatus]
 
 
 class AbstractDeliveryAddress(models.Model):
@@ -92,32 +95,73 @@ class Batch(models.Model):
     created_on = models.DateTimeField(auto_now_add=True)
     completed_on = models.DateTimeField(null=True, blank=True)
     updated_on = models.DateTimeField(editable=False, blank=True, null=True)
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES,
+                              default=OrderStatus.SUBMITTED.value,
+                              help_text="initial status")
 
-    def status(self):
-        order = {
-            OrderStatus.SUBMITTED.value: 0,
-            OrderStatus.ACCEPTED.value: 1,
-            OrderStatus.IN_PRODUCTION.value: 2,
-            OrderStatus.SUSPENDED.value: 3,
-            OrderStatus.CANCELLED.value: 4,
-            OrderStatus.COMPLETED.value: 5,
-            OrderStatus.FAILED.value: 6,
-            OrderStatus.TERMINATED.value: 7,
-            OrderStatus.DOWNLOADED.value: 8,
-        }
-        item_statuses = set([oi.status for oi in self.order_items.all()])
-        if OrderStatus.FAILED.value in item_statuses:
-            status = OrderStatus.FAILED.value
-        elif len(item_statuses) == 1:
-            status = item_statuses.pop()
-        elif any(item_statuses):
-            status = list(item_statuses)[0]
-            for st in item_statuses:
-                if order[st] < order[status]:
-                    status = st
+    def update_status(self):
+        """Update a batch's status
+
+        This method is called whenever an order item is saved.
+        """
+
+        done_items = 0
+        for item in self.order_items.all():
+            item_status = OrderStatus(item.status)
+            if item_status in (OrderStatus.COMPLETED, OrderStatus.DOWNLOADED):
+                done_items += 1
+            else:
+                status = item_status
+                break
         else:
-            status = None
-        return status
+            if done_items == self.order_items.count():
+                status = OrderStatus.COMPLETED
+            else:
+                status = OrderStatus.IN_PRODUCTION
+        now = dt.datetime.now(pytz.utc)
+        self.status = status.value
+        self.updated_on = now
+        if status in (OrderStatus.COMPLETED, OrderStatus.TERMINATED,
+                      OrderStatus.FAILED):
+            self.completed_on = now
+        elif status == OrderStatus.DOWNLOADED:
+            pass
+        else:
+            self.completed_on = None
+        self.save()
+
+    def save(self, *args, **kwargs):
+        """Reimplment save() method in order to update the batch's order."""
+        super(Batch, self).save(*args, **kwargs)
+        self.order.update_status()
+
+
+
+    #def status(self):
+    #    order = {
+    #        OrderStatus.SUBMITTED.value: 0,
+    #        OrderStatus.ACCEPTED.value: 1,
+    #        OrderStatus.IN_PRODUCTION.value: 2,
+    #        OrderStatus.SUSPENDED.value: 3,
+    #        OrderStatus.CANCELLED.value: 4,
+    #        OrderStatus.COMPLETED.value: 5,
+    #        OrderStatus.FAILED.value: 6,
+    #        OrderStatus.TERMINATED.value: 7,
+    #        OrderStatus.DOWNLOADED.value: 8,
+    #    }
+    #    item_statuses = set([oi.status for oi in self.order_items.all()])
+    #    if OrderStatus.FAILED.value in item_statuses:
+    #        status = OrderStatus.FAILED.value
+    #    elif len(item_statuses) == 1:
+    #        status = item_statuses.pop()
+    #    elif any(item_statuses):
+    #        status = list(item_statuses)[0]
+    #        for st in item_statuses:
+    #            if order[st] < order[status]:
+    #                status = st
+    #    else:
+    #        status = None
+    #    return status
 
     def price(self):
         total = Decimal(0)
@@ -213,7 +257,6 @@ class Batch(models.Model):
 
 
 class CustomizableItem(models.Model):
-    STATUS_CHOICES = [(status.value, status.value) for status in OrderStatus]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES,
                               default=OrderStatus.SUBMITTED.value,
                               help_text="initial status")
@@ -381,7 +424,7 @@ class Order(CustomizableItem):
 
     def create_batch(self, item_status, additional_status_info,
                      *order_items_spec):
-        batch = Batch()
+        batch = Batch(order=self, status=self.status)
         batch.save()
         for item_spec in order_items_spec:
             batch.create_order_item(item_status, additional_status_info,
@@ -433,6 +476,12 @@ class Order(CustomizableItem):
                 raise NotImplementedError
         return om
 
+    def update_status(self):
+        try:
+            self.productorder.update_status()
+        except ProductOrder.DoesNotExist:
+            self.derivedorder.update_sattus()
+
 
     def __unicode__(self):
         return '{}'.format(self.id)
@@ -457,13 +506,31 @@ class OrderPendingModeration(Order):
 
 class ProductOrder(Order):
 
+    def update_status(self):
+        # product orders have only one batch
+        batch = self.batches.get()
+        self.status = batch.status
+        additional_info = ""
+        for item in batch.order_items.all():
+            additional_info += "{} \n\n".format(item.additional_status_info)
+        self.additional_status_info = additional_info
+        self.save()
+
     def __unicode__(self):
         return "{}({})".format(self.__class__.__name__, self.id)
 
 
 # TODO - Remove this model
 class DerivedOrder(Order):
-    pass
+
+    def update_status(self):
+        try:
+            self.massiveorder.update_status()
+        except MassiveOrder.DoesNotExist:
+            try:
+                self.subscriptionorder.update_status()
+            except SubscriptionOrder.DoesNotExist:
+                self.taskingorder.update_status()
 
 class MassiveOrder(DerivedOrder):
 
@@ -507,6 +574,10 @@ class SubscriptionOrder(DerivedOrder):
                                          "{}".format(collection))
         self.batches.add(batch)
         return batch
+
+    def update_status(self):
+        #most_recent = [b for b in self.batches.order_by("-completed_on")][0]
+        raise NotImplementedError
 
     def __unicode__(self):
         return "{}({})".format(self.__class__.__name__, self.id)
@@ -589,7 +660,7 @@ class OrderItem(CustomizableItem):
         # normal product orders and for subscription batches
         sit.productId = self.identifier
         sit.productOrderOptionsId = "Options for {} {}".format(
-            self.collection.name, self.batch.order.order_type)
+            self.collection, self.batch.order.order_type)
         sit.orderItemRemark = _n(self.remark)
         sit.collectionId = _n(self.collection_id)
         # add any 'option' elements that may be present
@@ -664,6 +735,11 @@ class OrderItem(CustomizableItem):
                 result = True
         return result
 
+    def save(self, *args, **kwargs):
+        """Reimplementation of model.save() to update status on batch"""
+        super(OrderItem, self).save(*args, **kwargs)
+        self.batch.update_status()
+
     def _create_expiry_date(self):
         now = dt.datetime.now(pytz.utc)
         order_type = OrderType(self.batch.order.order_type)
@@ -673,7 +749,11 @@ class OrderItem(CustomizableItem):
         return expiry_date
 
     def __unicode__(self):
-        return str(self.item_id)
+        return ("id={0.id!r}, batch={1.id!r}, "
+                "order={2.id!r}, item_id={0.item_id!r}".format(
+            self, self.batch, self.batch.order)
+        )
+
 
 
 #class OseoFile(models.Model):

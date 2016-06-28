@@ -65,14 +65,10 @@ def process_product_order(self, order_id):
 
     """
 
-    try:
-        order = models.ProductOrder.objects.get(pk=order_id)
-        order.status = OrderStatus.IN_PRODUCTION.value
-        order.additional_status_info = "Order is being processed"
-        order.save()
-    except models.ProductOrder.DoesNotExist:
-        logger.error('Could not find order {}'.format(order_id))
-        raise
+    order = models.ProductOrder.objects.get(pk=order_id)
+    order.status = OrderStatus.IN_PRODUCTION.value
+    order.additional_status_info = "Order is being processed"
+    order.save()
     batch = order.batches.get() # normal product orders have only one batch
     process_product_order_batch.apply_async((batch.id,))
 
@@ -329,6 +325,7 @@ def _process_batch(batch_id):
 
 
 def _package_batch(batch, compression):
+    """Package all order items of a batch into a single archive"""
     item_processor = utilities.get_item_processor(batch.order)
     files_to_package = []
     try:

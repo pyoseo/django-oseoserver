@@ -92,21 +92,21 @@ def update_status_changed_on_by_order_item(sender, **kwargs):
         order_item.status_changed_on = dt.datetime.now(pytz.utc)
 
 
-@receiver(post_save, sender=models.OrderItem, weak=False,
-          dispatch_uid='id_for_update_batch')
-def update_batch(sender, **kwargs):
-    order_item = kwargs["instance"]
-    batch = order_item.batch
-    now = dt.datetime.now(pytz.utc)
-    batch.updated_on = now
-    status = batch.status()
-    if status in (OrderStatus.COMPLETED.value, OrderStatus.FAILED.value,
-                  OrderStatus.TERMINATED.value):
-        batch.completed_on = now
-    elif status == OrderStatus.DOWNLOADED.value:
-        pass
-    else:
-        batch.completed_on = None
+#@receiver(post_save, sender=models.OrderItem, weak=False,
+#          dispatch_uid='id_for_update_batch')
+#def update_batch(sender, **kwargs):
+#    order_item = kwargs["instance"]
+#    batch = order_item.batch
+#    now = dt.datetime.now(pytz.utc)
+#    batch.updated_on = now
+#    status = batch.status()
+#    if status in (OrderStatus.COMPLETED.value, OrderStatus.FAILED.value,
+#                  OrderStatus.TERMINATED.value):
+#        batch.completed_on = now
+#    elif status == OrderStatus.DOWNLOADED.value:
+#        pass
+#    else:
+#        batch.completed_on = None
 
 
 @receiver(signals.order_status_changed, weak=False,
@@ -147,31 +147,31 @@ def handle_order_submission(sender, **kwargs):
         # where's the code that sends email?
 
 
-@receiver(signals.order_failed, weak=False,
-          dispatch_uid='id_for_handle_order_failure')
-def handle_order_failure(sender, **kwargs):
-    """Notify the staff by e-mail that an order has failed
-
-    :param sender:
-    :param kwargs:
-    :return:
-    """
-
-    order = kwargs["instance"]
-    if order.status == OrderStatus.FAILED.value:
-        print("Order {} has failed.".format(order))
-        details = [d.replace("* Order item ", "").split(":") for d in
-                   order.additional_status_info.split("\n")]
-        template = "order_failed.html"
-        context = {
-            "order": order,
-            "details": details,
-        }
-        msg = render_to_string(template, context)
-        subject = ("Copernicus Global Land Service - Order {} has "
-                   "failed".format(order))
-        recipients = User.objects.filter(is_staff=True).exclude(email="")
-        utilities.send_email(subject, msg, recipients, html=True)
+#@receiver(signals.order_failed, weak=False,
+#          dispatch_uid='id_for_handle_order_failure')
+#def handle_order_failure(sender, **kwargs):
+#    """Notify the staff by e-mail that an order has failed
+#
+#    :param sender:
+#    :param kwargs:
+#    :return:
+#    """
+#
+#    order = kwargs["instance"]
+#    if order.status == OrderStatus.FAILED.value:
+#        print("Order {} has failed.".format(order))
+#        details = [d.replace("* Order item ", "").split(":") for d in
+#                   order.additional_status_info.split("\n")]
+#        template = "order_failed.html"
+#        context = {
+#            "order": order,
+#            "details": details,
+#        }
+#        msg = render_to_string(template, context)
+#        subject = ("Copernicus Global Land Service - Order {} has "
+#                   "failed".format(order))
+#        recipients = User.objects.filter(is_staff=True).exclude(email="")
+#        utilities.send_email(subject, msg, recipients, html=True)
 
 
 @receiver(signals.invalid_request, weak=False,
