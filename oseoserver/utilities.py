@@ -19,13 +19,16 @@ Some utility functions for pyoseo
 import importlib
 import logging
 
+from celery.utils import mail
 from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model
 from django.core.urlresolvers import reverse
 from django.template.loader import render_to_string
-
-from mailqueue.models import MailerMessage
 from html2text import html2text
+from mailqueue.models import MailerMessage
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import HtmlFormatter
 
 from . import settings
 from . import constants
@@ -366,3 +369,29 @@ def _n(value):
     """
 
     return None if value == '' else value
+
+
+class OseoCeleryErrorMail(mail.ErrorMail):
+
+    def format_body(self, context):
+        template = "order_item_failed.html"
+        highlighted_code = highlight(
+            context["exc"], PythonLexer(), HtmlFormatter())
+        context["highlighted_exc"] = highlighted_code
+        subject = "Copernicus Global Land Service - Task error"
+        msg = render_to_string(template, context)
+        return msg
+
+    def format_subject(self, context):
+        subject = "Copernicus Global Land Service - Task error"
+        return subject
+
+    def send(self, context, exc, fail_silently=True):
+        if self.should_send(context, exc):
+            UserModel = get_user_model()
+            send_email(
+                self.format_subject(context),
+                self.format_body(context),
+                UserModel.objects.filter(is_staff=True).exclude(email=""),
+                html=True
+            )

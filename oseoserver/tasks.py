@@ -133,6 +133,7 @@ def notify_user_product_batch_available(self, batch_id):
     bind=True,
     max_retries=3,
     default_retry_delay=20,
+    ErrorMail=utilities.OseoCeleryErrorMail
 )
 def process_online_data_access_item(self, order_item_id, max_tries=3,
                                     sleep_interval=10):
@@ -150,6 +151,7 @@ def process_online_data_access_item(self, order_item_id, max_tries=3,
 
     """
 
+    print("mail class: {}".format(self.ErrorMail))
     order_item = models.OrderItem.objects.get(pk=order_item_id)
     try:
         order_item.process()
