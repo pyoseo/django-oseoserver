@@ -6,7 +6,7 @@
     </ul>
 </p>
 <p>Exception: {{ exc }}</p>
-<p>Exception: {{ highlighted_exc }}</p>
+<p>Exception: {{ highlighted_exc|safe }}</p>
 <p>Calling args: {{ args }}</p>
 <p>Calling kwargs: {{ kwargs }}</p>
-<p>Full traceback: {{ traceback }}</p>
+<p>Full traceback: {{ highlighted_traceback|safe }}</p>

@@ -15,6 +15,7 @@
 import datetime as dt
 import pytz
 from cStringIO import StringIO
+import logging
 
 from django.dispatch import receiver
 from django.db.models.signals import post_save, post_init, pre_save
@@ -28,6 +29,8 @@ from .. import utilities
 from ..constants import OrderStatus
 from ..constants import OrderType
 from ..constants import StatusNotification
+
+logger = logging.getLogger(__name__)
 
 
 @receiver(post_init, sender=models.TaskingOrder, weak=False,
@@ -146,48 +149,4 @@ def handle_order_submission(sender, **kwargs):
               "be processed".format(order))
         # where's the code that sends email?
 
-
-#@receiver(signals.order_failed, weak=False,
-#          dispatch_uid='id_for_handle_order_failure')
-#def handle_order_failure(sender, **kwargs):
-#    """Notify the staff by e-mail that an order has failed
-#
-#    :param sender:
-#    :param kwargs:
-#    :return:
-#    """
-#
-#    order = kwargs["instance"]
-#    if order.status == OrderStatus.FAILED.value:
-#        print("Order {} has failed.".format(order))
-#        details = [d.replace("* Order item ", "").split(":") for d in
-#                   order.additional_status_info.split("\n")]
-#        template = "order_failed.html"
-#        context = {
-#            "order": order,
-#            "details": details,
-#        }
-#        msg = render_to_string(template, context)
-#        subject = ("Copernicus Global Land Service - Order {} has "
-#                   "failed".format(order))
-#        recipients = User.objects.filter(is_staff=True).exclude(email="")
-#        utilities.send_email(subject, msg, recipients, html=True)
-
-
-@receiver(signals.invalid_request, weak=False,
-          dispatch_uid="id_for_handle_invalid_request")
-def handle_invalid_request(sender, **kwargs):
-    print("received invalid request")
-    template = "invalid_request.html"
-    request_data = File(StringIO(kwargs["request_data"]),
-                        name="request_data.xml")
-    exception_report = File(StringIO(kwargs["exception_report"]),
-                            name="exception_report.xml")
-    msg = render_to_string(template)
-    subject = ("Copernicus Global Land Service - Received invalid request")
-    recipients = User.objects.filter(is_staff=True).exclude(email="")
-    utilities.send_email(
-        subject, msg, recipients,
-        html=True, attachments=[request_data, exception_report]
-    )
 

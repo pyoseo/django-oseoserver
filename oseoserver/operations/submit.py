@@ -69,6 +69,7 @@ class Submit(object):
             if len(requested_spec.orderItem) > settings.get_max_order_items():
                 raise errors.OseoError("NoApplicableCode",
                                        "Code not applicable")
+            logger.debug("Validating submit parameters...")
             order_spec = self.process_order_specification(
                 request.orderSpecification)
         else:
@@ -76,6 +77,7 @@ class Submit(object):
                                      "implemented")
         # TODO - raise an error if there are no delivery options on the
         # order_specification either at the order or order item levels
+        logger.debug("Saving submit request into order database...")
         order = self.create_order(
             order_type=order_spec["order_type"],
             delivery_options=order_spec["delivery_options"],
@@ -289,6 +291,8 @@ class Submit(object):
             "order_item": [],
         }
         for order_item in order_specification.orderItem:
+            logger.debug("Validating order item {!r}...".format(
+                order_item.itemId))
             spec["order_item"].append(
                 self.validate_order_item(order_item, order_type)
             )
@@ -662,6 +666,7 @@ class Submit(object):
             values_tree = etree.fromstring(values.toxml(ENCODING))
             for value in values_tree:
                 option_name = etree.QName(value).localname
+                logger.debug("Validating option {!r}...".format(option_name))
                 parsed_value = utilities.validate_processing_option(
                     option_name, value, order_type, collection_name)
                 validated_options[option_name] = parsed_value

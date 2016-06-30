@@ -16,12 +16,14 @@
 Some utility functions for pyoseo
 """
 
+from cStringIO import StringIO
 import importlib
 import logging
 
 from celery.utils import mail
 from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model
+from django.core.files import File
 from django.core.urlresolvers import reverse
 from django.template.loader import render_to_string
 from html2text import html2text
@@ -123,6 +125,17 @@ def validate_collection_id(collection_id):
             break
     else:
         raise errors.InvalidParameterValueError("collectionId")
+    return result
+
+
+def get_collection_settings(collection_name):
+    for collection_config in settings.get_collections():
+        if collection_config["name"] == collection_name:
+            result = collection_config
+            break
+    else:
+        raise errors.OseoServerError(
+            "Invalid collection: {!r}".format(collection_name))
     return result
 
 
@@ -313,6 +326,26 @@ def send_failed_attempt_email(order_id, item_id, message):
     send_email(subject, full_message, recipients, html=True)
 
 
+def send_invalid_request_email(request_data, exception_report):
+    request = File(
+        StringIO(request_data),
+        name="request_data.xml"
+    )
+    exception_report = File(
+        StringIO(exception_report),
+        name="exception_report.xml"
+    )
+    template = "invalid_request.html"
+    msg = render_to_string(template)
+    subject = ("Copernicus Global Land Service - Received invalid request")
+    recipients = get_user_model().objects.filter(
+        is_staff=True).exclude(email="")
+    send_email(
+        subject, msg, recipients,
+        html=True, attachments=[request, exception_report]
+    )
+
+
 def send_email(subject, message, recipients, html=False, attachments=None):
     """Send emails
 
@@ -375,10 +408,10 @@ class OseoCeleryErrorMail(mail.ErrorMail):
 
     def format_body(self, context):
         template = "order_item_failed.html"
-        highlighted_code = highlight(
+        context["highlighted_exc"] = highlight(
             context["exc"], PythonLexer(), HtmlFormatter())
-        context["highlighted_exc"] = highlighted_code
-        subject = "Copernicus Global Land Service - Task error"
+        context["highlighted_traceback"] = highlight(
+            context["traceback"], PythonLexer(), HtmlFormatter())
         msg = render_to_string(template, context)
         return msg
 

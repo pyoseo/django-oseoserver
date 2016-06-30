@@ -85,10 +85,11 @@ def oseo_endpoint(request):
                     soap_code=soap_fault_code,
                     soap_version=soap_version
                 )
-            signals.invalid_request.send_robust(
-                sender=__name__,
+            logger.exception("Received invalid request. Notifying admins...")
+            utilities.send_invalid_request_email(
                 request_data=request.body,
-                exception_report=exception_report
+                exception_report=etree.tostring(exception_report,
+                                                pretty_print=True),
             )
         except errors.ServerError:
             raise

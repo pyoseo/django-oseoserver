@@ -19,12 +19,15 @@ Implements the OSEO GetStatus operation
 from __future__ import absolute_import
 import re
 import datetime as dt
+import logging
 
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from .. import models
 from .. import errors
 from .. import constants
+
+logger = logging.getLogger(__name__)
 
 
 class GetStatus(object):
@@ -107,7 +110,7 @@ class GetStatus(object):
         last_update: datetime.datetime, optional
             Consider only orders that have been updated since the last time
             a GetStatus request has been received
-        last_update_end: datetime.datetime or str, optional
+        last_update_end: pyxb.binding.datatypes.anyType, optional
             Consider only orders that have not been updated since the
             last time a GetStatus request has been received
         statuses: list, optional
@@ -124,20 +127,22 @@ class GetStatus(object):
 
         """
 
+        logger.debug("locals(): {}".format(locals()))
         records_qs = models.Order.objects.filter(user=user)
         if last_update is not None:
             records_qs = records_qs.filter(status_changed_on__gte=last_update)
         if last_update_end is not None:
-            if not isinstance(last_update_end, dt.datetime):
+            end = last_update_end.content()[0]
+            if not isinstance(end, dt.datetime):
                 m = re.search(r'\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?',
-                              last_update_end)
+                              end)
                 try:
                     ts = dt.datetime.strptime(m.group(), '%Y-%m-%dT%H:%M:%SZ')
                 except ValueError:
                     ts = dt.datetime.strptime(m.group(), '%Y-%m-%d')
             else:
-                ts = last_update_end
-            records_qs = records_qs.filter(status_changed_on_lte=ts)
+                ts = end
+            records_qs = records_qs.filter(status_changed_on__lte=ts)
         if order_reference is not None:
             records_qs = records_qs.filter(reference=order_reference)
         if any(statuses or []):

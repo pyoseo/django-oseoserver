@@ -512,7 +512,8 @@ class ProductOrder(Order):
         self.status = batch.status
         additional_info = ""
         for item in batch.order_items.all():
-            additional_info += "{} \n\n".format(item.additional_status_info)
+            additional_info += ("Item {0.item_id} - "
+                                "{0.additional_status_info} \n\n".format(item))
         self.additional_status_info = additional_info
         self.save()
 
@@ -662,7 +663,9 @@ class OrderItem(CustomizableItem):
         sit.productOrderOptionsId = "Options for {} {}".format(
             self.collection, self.batch.order.order_type)
         sit.orderItemRemark = _n(self.remark)
-        sit.collectionId = _n(self.collection_id)
+        collection_settings = utilities.get_collection_settings(
+            self.collection)
+        sit.collectionId = _n(collection_settings["collection_identifier"])
         # add any 'option' elements that may be present
         # add any 'sceneSelection' elements that may be present
         sit.deliveryOptions = self.create_oseo_delivery_options()

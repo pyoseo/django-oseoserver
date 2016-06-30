@@ -112,6 +112,7 @@ class OseoServer(object):
 
         schema_instance = self.parse_xml(request_data)
         operation, op_name = self._get_operation(schema_instance)
+        logger.debug("Requested operation: {!r}".format(op_name))
         result = operation(schema_instance, user)
         if op_name == "Submit":
             response, order = result

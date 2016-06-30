@@ -190,7 +190,7 @@ def update_product_order_status(self, order_id):
     order = models.ProductOrder.objects.get(pk=order_id)
     old_order_status = order.status
     batch = order.batches.get()  # ProductOrder's have only one batch
-    if batch.status() == OrderStatus.COMPLETED.value and order.packaging != '':
+    if batch.status == OrderStatus.COMPLETED.value and order.packaging != '':
         try:
             _package_batch(batch, order.packaging)
         except Exception as e:
@@ -198,7 +198,7 @@ def update_product_order_status(self, order_id):
             order.additional_status_info = str(e)
             order.save()
             raise
-    new_order_status = batch.status()
+    new_order_status = batch.status
     if (old_order_status != new_order_status or
                 old_order_status == OrderStatus.FAILED.value):
         order.status = new_order_status
