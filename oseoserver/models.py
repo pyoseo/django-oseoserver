@@ -111,20 +111,20 @@ class Batch(models.Model):
             if item_status in (OrderStatus.COMPLETED, OrderStatus.DOWNLOADED):
                 done_items += 1
             else:
-                status = item_status
+                new_status = item_status
                 break
         else:
             if done_items == self.order_items.count():
-                status = OrderStatus.COMPLETED
+                new_status = OrderStatus.COMPLETED
             else:
-                status = OrderStatus.IN_PRODUCTION
+                new_status = OrderStatus.IN_PRODUCTION
         now = dt.datetime.now(pytz.utc)
-        self.status = status.value
+        self.status = new_status.value
         self.updated_on = now
-        if status in (OrderStatus.COMPLETED, OrderStatus.TERMINATED,
-                      OrderStatus.FAILED):
+        if new_status in (OrderStatus.COMPLETED, OrderStatus.TERMINATED,
+                          OrderStatus.FAILED):
             self.completed_on = now
-        elif status == OrderStatus.DOWNLOADED:
+        elif new_status == OrderStatus.DOWNLOADED:
             pass
         else:
             self.completed_on = None
@@ -134,34 +134,6 @@ class Batch(models.Model):
         """Reimplment save() method in order to update the batch's order."""
         super(Batch, self).save(*args, **kwargs)
         self.order.update_status()
-
-
-
-    #def status(self):
-    #    order = {
-    #        OrderStatus.SUBMITTED.value: 0,
-    #        OrderStatus.ACCEPTED.value: 1,
-    #        OrderStatus.IN_PRODUCTION.value: 2,
-    #        OrderStatus.SUSPENDED.value: 3,
-    #        OrderStatus.CANCELLED.value: 4,
-    #        OrderStatus.COMPLETED.value: 5,
-    #        OrderStatus.FAILED.value: 6,
-    #        OrderStatus.TERMINATED.value: 7,
-    #        OrderStatus.DOWNLOADED.value: 8,
-    #    }
-    #    item_statuses = set([oi.status for oi in self.order_items.all()])
-    #    if OrderStatus.FAILED.value in item_statuses:
-    #        status = OrderStatus.FAILED.value
-    #    elif len(item_statuses) == 1:
-    #        status = item_statuses.pop()
-    #    elif any(item_statuses):
-    #        status = list(item_statuses)[0]
-    #        for st in item_statuses:
-    #            if order[st] < order[status]:
-    #                status = st
-    #    else:
-    #        status = None
-    #    return status
 
     def price(self):
         total = Decimal(0)
@@ -181,8 +153,9 @@ class Batch(models.Model):
         item.save()
         for name, value in order_item_spec["option"].items():
             # assuming that the option has already been validated
-            item.selected_options.add(SelectedOption(option=value,
-                                                     value=value))
+            selected_option = SelectedOption(option=name, value=value,
+                                             customizable_item=item)
+            selected_option.save()
         for name, value in order_item_spec["scene_selection"].items():
             item.selected_scene_selection_options.add(
                 SelectedSceneSelectionOption(option=name, value=value))
@@ -339,10 +312,12 @@ class DeliveryInformation(AbstractDeliveryAddress):
             del_info.mailAddress.lastName = _n(self.last_name)
             del_info.mailAddress.companyRef = _n(self.company_ref)
             del_info.mailAddress.postalAddress = BIND()
-            del_info.mailAddress.postalAddress.streetAddress = _n(self.street_address)
+            del_info.mailAddress.postalAddress.streetAddress = _n(
+                self.street_address)
             del_info.mailAddress.postalAddress.city = _n(self.city)
             del_info.mailAddress.postalAddress.state = _n(self.state)
-            del_info.mailAddress.postalAddress.postalCode = _n(self.postal_code)
+            del_info.mailAddress.postalAddress.postalCode = _n(
+                self.postal_code)
             del_info.mailAddress.postalAddress.country = _n(self.country)
             del_info.mailAddress.postalAddress.postBox = _n(self.post_box)
             del_info.mailAddress.telephoneNumber = _n(self.telephone)
@@ -482,7 +457,6 @@ class Order(CustomizableItem):
         except ProductOrder.DoesNotExist:
             self.derivedorder.update_sattus()
 
-
     def __unicode__(self):
         return '{}'.format(self.id)
 
@@ -501,7 +475,6 @@ class OrderPendingModeration(Order):
     class Meta:
         proxy = True
         verbose_name_plural = "orders pending moderation"
-
 
 
 class ProductOrder(Order):
@@ -532,6 +505,7 @@ class DerivedOrder(Order):
                 self.subscriptionorder.update_status()
             except SubscriptionOrder.DoesNotExist:
                 self.taskingorder.update_status()
+
 
 class MassiveOrder(DerivedOrder):
 
@@ -622,9 +596,9 @@ class OrderItem(CustomizableItem):
     def export_options(self):
         valid_options = dict()
         for order_option in self.batch.order.selected_options.all():
-            valid_options[order_option.option.name] = order_option.value
+            valid_options[order_option.name] = order_option.value
         for item_option in self.selected_options.all():
-            valid_options[item_option.option.name] = item_option.value
+            valid_options[item_option.value] = item_option.value
         return valid_options
 
     def export_delivery_options(self):

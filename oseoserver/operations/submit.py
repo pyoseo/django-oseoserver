@@ -179,10 +179,10 @@ class Submit(object):
         # implement InvoiceAddress
         # implement DeliveryInformation
         for option_name, option_value in options.items():
-            order.selected_options.add(
-                models.SelectedOption(option=option_name, value=option_value),
-                bulk=False
-            )
+            selected_option = models.SelectedOption(option=option_name,
+                                                    value=option_value,
+                                                    customizable_item=order)
+            selected_option.save()
         if delivery_options["type"] == DeliveryOption.MEDIA_DELIVERY:
             delivery_details = ",".join(
                 (delivery_options["medium"], delivery_options["shipping"]))

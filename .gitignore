@@ -1,23 +1,14 @@
 dist/*
-
 *.egg-info/*
-
 *.pyc
-
 *.un~
-
 *.swp
-
 *~
-
 *.autosave
-
 docs/_build/*
-
 *.bak.*
-
 .idea/*
-
 celerybeat-schedule
+.cache/**
+.coverage
 
-.cache/*/v/cache/*

@@ -40,65 +40,62 @@ def oseo_endpoint(request):
 
     if not request.method == "POST":  # OSEO requests must always be POST
         return HttpResponseForbidden()
-
+    soap_version = None
     server = OseoServer()
     headers = {}
     try:
         request_element = etree.fromstring(request.body)
         soap_version = soap.get_soap_version(request_element)
-    except (errors.InvalidSoapVersionError, etree.XMLSyntaxError):
-        django_response = HttpResponseBadRequest()
-    else:
-        try:
-            headers = soap.get_http_headers(soap_version)
-            details = soap.unwrap_request(request_element)
-            request_data, username, password, password_attributes = details
-            user = authenticate(username=username, password=password,
-                                password_attributes=password_attributes)
-            logger.debug("user: {}".format(user))
-            if user is None or not user.is_active:
-                raise errors.OseoError(
-                    code="AuthenticationFailed",
-                    text="Invalid or missing identity information"
-                )
-            # TODO: Add authorization controls
-            process_response = server.process_request(request_data, user)
-            status_code = 200
-            if soap_version is None:
-                response = process_response
-            else:
-                response = soap.wrap_response(process_response,
-                                              soap_version)
-        except errors.OseoError as err:
-            if err.code == "AuthorizationFailed":
-                status_code = 401
-            else:
-                status_code = 400
-            exception_report = server.create_exception_report(
-                err.code, err.text, err.locator)
-            if soap_version is None:
-                response = exception_report
-            else:
-                soap_fault_code = soap.get_soap_fault_code(err.code)
-                response = soap.wrap_soap_fault(
-                    exception_element=exception_report,
-                    soap_code=soap_fault_code,
-                    soap_version=soap_version
-                )
-            logger.exception("Received invalid request. Notifying admins...")
-            utilities.send_invalid_request_email(
-                request_data=request.body,
-                exception_report=etree.tostring(exception_report,
-                                                pretty_print=True),
+        headers = soap.get_http_headers(soap_version)
+        details = soap.unwrap_request(request_element)
+        request_data, username, password, password_attributes = details
+        user = authenticate(username=username, password=password,
+                            password_attributes=password_attributes)
+        logger.debug("user: {}".format(user))
+        if user is None or not user.is_active:
+            raise errors.OseoError(
+                code="AuthenticationFailed",
+                text="Invalid or missing identity information"
             )
-        except errors.ServerError:
-            raise
-        serialized = etree.tostring(response, encoding=ENCODING,
-                                    pretty_print=True)
-        django_response = HttpResponse(serialized)
-        django_response.status_code = status_code
-        for k, v in headers.items():
-            django_response[k] = v
+        # TODO: Add authorization controls
+        process_response = server.process_request(request_data, user)
+        status_code = 200
+        if soap_version is None:
+            response = process_response
+        else:
+            response = soap.wrap_response(process_response,
+                                          soap_version)
+    except errors.OseoError as err:
+        if err.code == "AuthorizationFailed":
+            status_code = 401
+        else:
+            status_code = 400
+        exception_report = server.create_exception_report(
+            err.code, err.text, err.locator)
+        if soap_version is None:
+            response = exception_report
+        else:
+            soap_fault_code = soap.get_soap_fault_code(err.code)
+            response = soap.wrap_soap_fault(
+                exception_element=exception_report,
+                soap_code=soap_fault_code,
+                soap_version=soap_version
+            )
+        logger.exception("Received invalid request. Notifying admins...")
+        utilities.send_invalid_request_email(
+            request_data=request.body,
+            exception_report=etree.tostring(exception_report,
+                                            pretty_print=True),
+        )
+    except (errors.InvalidSoapVersionError, etree.XMLSyntaxError,
+            errors.ServerError):
+        raise
+    serialized = etree.tostring(response, encoding=ENCODING,
+                                pretty_print=True)
+    django_response = HttpResponse(serialized)
+    django_response.status_code = status_code
+    for k, v in headers.items():
+        django_response[k] = v
     return django_response
 
 

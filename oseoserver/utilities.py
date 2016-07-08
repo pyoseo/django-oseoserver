@@ -36,7 +36,7 @@ from . import settings
 from . import constants
 from . import errors
 
-logger = logging.getLogger('.'.join(('pyoseo', __name__)))
+logger = logging.getLogger(__name__)
 
 
 def import_class(python_path, *instance_args, **instance_kwargs):
@@ -159,7 +159,8 @@ def validate_processing_option(name, value, order_type, collection_name):
             "Incorrectly configured "
             "item_processor: {}".format(item_processor_class_path)
         )
-
+    except IndexError:
+        raise errors.InvalidParameterValueError(locator="option", value=name)
     # 3. is the parsed value legal?
     for option in settings.get_processing_options():
         if option.get("name") == name:
