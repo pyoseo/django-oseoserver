@@ -186,11 +186,11 @@ class Batch(models.Model):
             items_status.append(i.create_oseo_status_item_type())
         return items_status
 
-    def get_completed_files(self, behaviour):
+    def get_completed_items(self, behaviour):
         last_time = self.order.last_describe_result_access_request
-        order_delivery = self.order.selected_delivery_option.option
+        order_delivery = self.order.selected_delivery_option.delivery_type
         completed = []
-        if self.status() != OrderStatus.COMPLETED.value:
+        if self.status != OrderStatus.COMPLETED.value:
             # batch is either still being processed,
             # failed or already downloaded, so we don't care for it
             pass
@@ -199,7 +199,7 @@ class Batch(models.Model):
             order_items = self.order_items.all()
             for oi in order_items:
                 try:
-                    delivery = oi.selected_delivery_option.option
+                    delivery = oi.selected_delivery_option.delivery_type
                 except SelectedDeliveryOption.DoesNotExist:
                     delivery = order_delivery
                 if delivery != DeliveryOption.ONLINE_DATA_ACCESS.value:
@@ -209,8 +209,10 @@ class Batch(models.Model):
                     if (last_time is None or behaviour == self.ALL_READY) or \
                             (behaviour == self.NEXT_READY and
                                      oi.completed_on >= last_time):
-                        for f in oi.files.filter(available=True):
-                            batch_complete_items.append((f, delivery))
+                        batch_complete_items.extend(
+                            (item for item in self.order_items.filter(
+                                available=True))
+                        )
             if self.order.packaging == Packaging.ZIP.value:
                 if len(batch_complete_items) == len(order_items):
                     # the zip is ready, lets get only a single file
@@ -596,9 +598,9 @@ class OrderItem(CustomizableItem):
     def export_options(self):
         valid_options = dict()
         for order_option in self.batch.order.selected_options.all():
-            valid_options[order_option.name] = order_option.value
+            valid_options[order_option.option] = order_option.value
         for item_option in self.selected_options.all():
-            valid_options[item_option.value] = item_option.value
+            valid_options[item_option.option] = item_option.value
         return valid_options
 
     def export_delivery_options(self):
