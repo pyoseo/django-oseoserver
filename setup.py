@@ -17,16 +17,15 @@ setup(
     install_requires=[
         "celery",
         "django",
-        "django-activity-stream",
+        #"django-activity-stream",
         "django-mail-queue",
         "django-sendfile",
         "enum34",
-        "flower",
+        #"flower",
         "html2text",
         #"librabbitmq",
         "lxml",
         "pyxb",
-        "redis",
     ],
     include_package_data=True,
 )
