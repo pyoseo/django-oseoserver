@@ -26,6 +26,7 @@ setup(
         #"librabbitmq",
         "lxml",
         "pyxb",
+        "redis",
     ],
     include_package_data=True,
 )
