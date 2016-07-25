@@ -3,14 +3,13 @@ import os
 import os.path
 from datetime import datetime
 import logging
+import pytz
 
-from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.http import HttpResponseForbidden
 from django.http import HttpResponseNotFound
-from django.http import HttpResponseBadRequest
 from django.contrib.auth import authenticate
-from django.shortcuts import get_object_or_404, get_list_or_404
+from django.contrib.auth import get_user_model
 from django.views.decorators.csrf import csrf_exempt
 from lxml import etree
 from sendfile import sendfile
@@ -19,10 +18,8 @@ from .constants import ENCODING
 from . import errors
 from . import models
 from . import utilities
-from . import settings
 from . import soap
 from .server import OseoServer
-from .signals import signals
 
 logger = logging.getLogger(__name__)
 
@@ -100,78 +97,39 @@ def oseo_endpoint(request):
 
 
 def get_ordered_file(request, user_name, order_id, item_id, file_name):
-    """
-    Handle delivery of order items that specify HTTP as method.
+    """Handle delivery of order items that specify HTTP as method."""
 
-    :param request:
-    :param user_name:
-    :param order_id:
-    :param item_id:
-    :param file_name:
-    :return:
-    """
+    UserModel = get_user_model()
+    try:
+        user = UserModel.objects.get(username=user_name)
+        order = models.Order.objects.get(pk=int(order_id))
+        if order.user != user:
+            raise RuntimeError  # this user cannot access the order
+        else:
+            # 3. convert the url into a file system path
+            full_url = request.build_absolute_uri()
+            full_url = full_url[:-1] if full_url.endswith('/') else full_url
 
-    # 1. authenticate the user
-    # 2. authorize the user
+            # 4. retrieve the file
+            order_item = models.OrderItem.objects.get(
+                batch__order__id=int(order_id), item_id=item_id)
+            item_processor = utilities.get_item_processor(order_item)
+            path = item_processor.get_file_path(full_url)
 
-    # 3. convert the url into a file system path
-    full_uri = request.build_absolute_uri()
-    full_uri = full_uri[:-1] if full_uri.endswith('/') else full_uri
-    # 4. retrieve the file
-    order_type = models.Order.objects.get(id=order_id).order_type
-    # TODO: replace PROCESSING_PROCESS_ITEM with a more suitable processing_step
-    processor, params = utilities.get_processor(
-        order_type, models.ItemProcessor.PROCESSING_PROCESS_ITEM)
-    path = processor.get_file_path(full_uri)
-    # 5. update oseoserver's database
-    oseo_file = get_object_or_404(models.OseoFile, url=full_uri)
-    if oseo_file.available:
-        oseo_file.downloads += 1
-        oseo_file.last_downloaded_at = datetime.utcnow()
-        oseo_file.save()
-        result = sendfile(request, path, attachment=True,
-                          attachment_filename=os.path.basename(path),
-                          mimetype=_get_mime_type(path), encoding="utf8")
-    else:
-        result = HttpResponseNotFound("The requested file is not available")
-    return result
-
-
-def get_ordered_packaged_files(request, user_name, order_id, package_name):
-    """
-    Handle delivery of order items that specify zip packaging and HTTP.
-
-    :param request:
-    :param user_name:
-    :param order_id:
-    :param package_name:
-    :return:
-    """
-
-    # 1. authenticate the user
-    # 2. authorize the user
-
-    # 3. convert the url into a file system path
-    full_uri = request.build_absolute_uri()
-    full_uri = full_uri[:-1] if full_uri.endswith('/') else full_uri
-    # 4. retrieve the file
-    order_type = models.Order.objects.get(id=order_id).order_type
-    # TODO: replace PROCESSING_PROCESS_ITEM with a more suitable processing_step
-    processor, params = utilities.get_processor(
-        order_type, models.ItemProcessor.PROCESSING_PROCESS_ITEM)
-    path = processor.get_file_path(full_uri)
-    # 5. update oseoserver's database
-    oseo_files = get_list_or_404(models.OseoFile, url=full_uri)
-    if any(oseo_files) and oseo_files[0].available:
-        for f in oseo_files:
-            f.downloads += 1
-            f.last_downloaded_at = datetime.utcnow()
-            f.save()
-        result = sendfile(request, path, attachment=True,
-                          attachment_filename=os.path.basename(path),
-                          mimetype=_get_mime_type(path), encoding="utf8")
-    else:
-        result = HttpResponseNotFound("The requested file is not available")
+            # 5. update oseoserver's database
+            if order_item.available:
+                order_item.downloads += 1
+                order_item.last_downloaded_at = datetime.now(pytz.utc)
+                order_item.save()
+                result = sendfile(request, path, attachment=True,
+                                  attachment_filename=os.path.basename(path),
+                                  mimetype=_get_mime_type(path), encoding="utf8")
+            else:
+                raise IOError  # the order is not available anymore
+    except (UserModel.DoesNotExist, RuntimeError):
+        result = HttpResponseForbidden()
+    except IOError:
+        result = HttpResponseNotFound()
     return result
 
 
