@@ -218,34 +218,40 @@ def update_product_order_status(self, order_id):
 
 
 @shared_task(bind=True)
-def delete_expired_oseo_files(self):
-    """Delete all oseo files that are expired from the filesystem"""
+def delete_expired_order_items(self):
+    """Delete all order items that are expired from the filesystem
 
-    qs = models.OseoFile.objects.filter(available=True,
-                                        expires_on__lt=datetime.now(pytz.utc))
-    for oseo_file in qs:
-        delete_oseo_file.apply_async((oseo_file.id,))
+    This task should be run preiodically in a celery beat worker.
+
+    """
+
+    now = datetime.now(pytz.utc)
+    for item in models.OrderItem.objects.filter(available=True,
+                                                expires_on__lt=now):
+        delete_order_item_file.apply_async((item.id,))
 
 
 @shared_task(bind=True)
-def delete_oseo_file(self, oseo_file_id):
-    """Delete an oseofile from the filesystem"""
+def delete_order_item_file(self, order_item_id):
+    """Delete a single order_item from the filesystem
 
-    oseo_file = models.OseoFile.objects.get(id=oseo_file_id)
-    processor, params = utilities.get_processor(
-        oseo_file.order_item.batch.order.order_type,
-        models.ItemProcessor.PROCESSING_CLEAN_ITEM,
-        logger_type="pyoseo"
-    )
+    This task calls the `clean_files()` method of the orderitem's order
+    processor object. It also takes care of setting the item's `available`
+    attribute to False.
+
+    """
+
+    order_item = models.OrderItem.objects.get(id=order_item_id)
+    processor = utilities.get_item_processor(order_item)
     try:
-        processor.clean_files(oseo_file.url)
+        processor.clean_files(order_item.url)
     except Exception as e:
         logger.error("There has been an error deleting "
-                     "{}: {}".format(oseo_file, e))
+                     "{}: {}".format(order_item, e))
     finally:
-        if oseo_file.available:
-            oseo_file.available = False
-            oseo_file.save()
+        if order_item.available:
+            order_item.available = False
+            order_item.save()
 
 
 @shared_task(bind=True)
