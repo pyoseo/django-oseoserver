@@ -209,10 +209,7 @@ class Batch(models.Model):
                     if (last_time is None or behaviour == self.ALL_READY) or \
                             (behaviour == self.NEXT_READY and
                                      oi.completed_on >= last_time):
-                        batch_complete_items.extend(
-                            (item for item in self.order_items.filter(
-                                available=True))
-                        )
+                        batch_complete_items.append(oi)
             if self.order.packaging == Packaging.ZIP.value:
                 if len(batch_complete_items) == len(order_items):
                     # the zip is ready, lets get only a single file
