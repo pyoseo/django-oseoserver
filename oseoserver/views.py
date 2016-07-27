@@ -96,53 +96,56 @@ def oseo_endpoint(request):
     return django_response
 
 
-def get_ordered_file(request, user_name, order_id, item_id, file_name):
-    """Handle delivery of order items that specify HTTP as method."""
-
-    UserModel = get_user_model()
-    try:
-        user = UserModel.objects.get(username=user_name)
-        order = models.Order.objects.get(pk=int(order_id))
-        if order.user != user:
-            raise RuntimeError  # this user cannot access the order
-        else:
-            # 3. convert the url into a file system path
-            full_url = request.build_absolute_uri()
-            full_url = full_url[:-1] if full_url.endswith('/') else full_url
-
-            # 4. retrieve the file
-            order_item = models.OrderItem.objects.get(
-                batch__order__id=int(order_id), item_id=item_id)
-            item_processor = utilities.get_item_processor(order_item)
-            path = item_processor.get_file_path(full_url)
-
-            # 5. update oseoserver's database
-            if order_item.available:
-                order_item.downloads += 1
-                order_item.last_downloaded_at = datetime.now(pytz.utc)
-                order_item.save()
-                result = sendfile(request, path, attachment=True,
-                                  attachment_filename=os.path.basename(path),
-                                  mimetype=_get_mime_type(path), encoding="utf8")
-            else:
-                raise IOError  # the order is not available anymore
-    except (UserModel.DoesNotExist, RuntimeError):
-        result = HttpResponseForbidden()
-    except IOError:
-        result = HttpResponseNotFound()
-    return result
-
-
-def _get_mime_type(path):
-    mime_map = {
-        "application/x-hdf": [".h5", ""],
-        "application/zip": [".zip",],
-        "application/x-bzip2": [".bz2",],
-    }
-    path_mime = None
-    ext = os.path.splitext(path)
-    for k, v in mime_map.iteritems():
-        if ext in v:
-            path_mime = k
-    return path_mime
+# TODO - This view does not belong in the oseoserver. Order item availability
+#        is to be handled by custom code, in a similar fashion as order item
+#        processing
+#def get_ordered_file(request, user_name, order_id, item_id, file_name):
+#    """Handle delivery of order items that specify HTTP as method."""
+#
+#    UserModel = get_user_model()
+#    try:
+#        user = UserModel.objects.get(username=user_name)
+#        order = models.Order.objects.get(pk=int(order_id))
+#        if order.user != user:
+#            raise RuntimeError  # this user cannot access the order
+#        else:
+#            # 3. convert the url into a file system path
+#            full_url = request.build_absolute_uri()
+#            full_url = full_url[:-1] if full_url.endswith('/') else full_url
+#
+#            # 4. retrieve the file
+#            order_item = models.OrderItem.objects.get(
+#                batch__order__id=int(order_id), item_id=item_id)
+#            item_processor = utilities.get_item_processor(order_item)
+#            path = item_processor.get_file_path(full_url)
+#
+#            # 5. update oseoserver's database
+#            if order_item.available:
+#                order_item.downloads += 1
+#                order_item.last_downloaded_at = datetime.now(pytz.utc)
+#                order_item.save()
+#                result = sendfile(request, path, attachment=True,
+#                                  attachment_filename=os.path.basename(path),
+#                                  mimetype=_get_mime_type(path), encoding="utf8")
+#            else:
+#                raise IOError  # the order is not available anymore
+#    except (UserModel.DoesNotExist, RuntimeError):
+#        result = HttpResponseForbidden()
+#    except IOError:
+#        result = HttpResponseNotFound()
+#    return result
+#
+#
+#def _get_mime_type(path):
+#    mime_map = {
+#        "application/x-hdf": [".h5", ""],
+#        "application/zip": [".zip",],
+#        "application/x-bzip2": [".bz2",],
+#    }
+#    path_mime = None
+#    ext = os.path.splitext(path)
+#    for k, v in mime_map.iteritems():
+#        if ext in v:
+#            path_mime = k
+#    return path_mime
 
