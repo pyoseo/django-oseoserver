@@ -687,7 +687,8 @@ class OrderItem(CustomizableItem):
             )
             self.status = OrderStatus.FAILED.value
             self.additional_status_info = error_message
-            raise errors.OseoServerError(error_message)
+            #raise errors.OseoServerError(error_message)
+            raise
         else:
             self.status = OrderStatus.COMPLETED.value
             self.additional_status_info = "Item processed"
