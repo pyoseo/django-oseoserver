@@ -14,6 +14,7 @@ setup(
     platforms=[""],
     license="",
     packages=find_packages(),
+    include_package_data=True,
     install_requires=[
         "celery",
         "django",
@@ -28,5 +29,4 @@ setup(
         "pyxb",
         "redis",
     ],
-    include_package_data=True,
 )
