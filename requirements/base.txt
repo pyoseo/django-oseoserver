@@ -1,1 +1,9 @@
---editable .
+celery==3.1.23
+django==1.9.8
+django-mail-queue==2.2.2
+django-sendfile==0.3.10
+enum34==1.1.6
+html2text==2016.5.29
+lxml==3.6.1
+pyxb==1.2.4
+redis==2.10.5
