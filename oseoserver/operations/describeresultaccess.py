@@ -28,6 +28,7 @@ from .. import errors
 from .. import models
 from ..utilities import get_collection_settings
 from ..constants import OrderType
+from ..constants import Packaging
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,8 @@ class DescribeResultAccess(object):
         response = oseo.DescribeResultAccessResponse(status='success')
 
         item_id = None
-        if len(completed_items) == 1 and order.packaging == models.Order.ZIP:
+        if (len(completed_items) == 1 and
+                    order.packaging == Packaging.ZIP.value):
             item_id = "Packaged order items"
         for item in completed_items:
             iut = oseo.ItemURLType()
