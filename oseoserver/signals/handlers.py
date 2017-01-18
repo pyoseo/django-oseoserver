@@ -14,7 +14,10 @@
 
 import datetime as dt
 import pytz
-from cStringIO import StringIO
+try:
+    from io import StringIO
+except ImportError:  # python2
+    from StringIO import StringIO
 import logging
 
 from django.dispatch import receiver

@@ -1,9 +1,9 @@
 from setuptools import setup, find_packages
 
-execfile("oseoserver/version.py")
+exec(open("oseoserver/version.py").read())
 
 setup(
-    name="django-oseoserver",
+    name="oseoserver",
     version=__version__,
     description="A django app that implements the OGC ordering standard (OSEO)",
     long_description="",
@@ -15,6 +15,11 @@ setup(
     license="",
     packages=find_packages(),
     include_package_data=True,
+    entry_points= {
+        "console_scripts": [
+            "install_pyxb_ogc_bindings=oseoserver.scripts.install_pyxb_ogc_bindings:main"
+        ],
+    },
     install_requires=[
         "celery",
         "django",

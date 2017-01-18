@@ -51,6 +51,7 @@ from .constants import DeliveryOption
 
 logger = get_task_logger(__name__)
 
+# TODO - Find another way to send error e-mails now that celery dropped it from tasks
 
 @shared_task(bind=True)
 def process_product_order(self, order_id):
@@ -133,7 +134,7 @@ def notify_user_product_batch_available(self, batch_id):
     bind=True,
     max_retries=3,
     default_retry_delay=20,
-    ErrorMail=utilities.OseoCeleryErrorMail
+    #ErrorMail=utilities.OseoCeleryErrorMail
 )
 def process_online_data_access_item(self, order_item_id, max_tries=3,
                                     sleep_interval=10):

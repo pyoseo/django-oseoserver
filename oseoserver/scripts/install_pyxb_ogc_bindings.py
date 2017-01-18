@@ -24,7 +24,37 @@ except ImportError as err:
 logger = logging.getLogger(__name__)
 
 
-def main(download_dir):
+def get_parser():
+    parser = argparse.ArgumentParser(usage=__doc__)
+    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--force", "-f", action="store_true",
+                        help="Reinstall PyXB even if it is already "
+                             "installed with the OGC bindings")
+    return parser
+
+
+def main():
+    parser = get_parser()
+    args = parser.parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING)
+    if not PYXB_AVAILABLE or args.force:
+        logger.debug("Installing PyXB with the OGC bindings...")
+        download_dir = pathlib2.Path(tempfile.mkdtemp())
+        try:
+            install_pyxb(download_dir)
+        except Exception as err:
+            print(err)
+        else:
+            print("Successfully installed PyXB with the opengis bundle!")
+        finally:
+            shutil.rmtree(str(download_dir))
+    else:
+        logger.debug("PyXB is already installed with the OGC bindings. "
+                     "Use the -f flag if you want to force re-installation.")
+
+
+def install_pyxb(download_dir):
     download_command = "pip download {} --dest {}".format(
         _get_declared_pyxb_version(),
         str(download_dir)
@@ -59,32 +89,4 @@ def _untar_file(path, destination_dir):
         tar_object = tarfile.open(str(path))
         tar_object.extractall(path=str(destination_dir))
         tar_object.close()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(usage=__doc__)
-    parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--force", "-f", action="store_true",
-                        help="Reinstall PyXB even if it is already "
-                             "installed with the OGC bindings")
-    args = parser.parse_args()
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.WARNING)
-    if not PYXB_AVAILABLE or args.force:
-        logger.debug("Installing PyXB with the OGC bindings...")
-        temporary_dir = pathlib2.Path(tempfile.mkdtemp())
-        try:
-            main(temporary_dir)
-        except Exception as err:
-            print(err)
-        else:
-            print("Successfully installed PyXB with the opengis bundle!")
-        finally:
-            shutil.rmtree(str(temporary_dir))
-    else:
-        logger.debug("PyXB is already installed with the OGC bindings. "
-                     "Use the -f flag if you want to force re-installation.")
-
-
-
 
