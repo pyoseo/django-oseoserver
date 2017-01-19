@@ -2,18 +2,68 @@
 
 import pytest
 import mock
+from lxml import etree
 
-from oseoserver.server import OseoServer
 from oseoserver import constants
+from oseoserver import errors
+from oseoserver.server import OseoServer
+from pyxb.bundles.opengis import oseo_1_0 as oseo
+
+pytestmark = pytest.mark.unit
 
 
-@pytest.mark.unit
 class TestServer(object):
 
     def test_can_create(self):
+        OseoServer()
+
+    def test_parse_xml_correct(self):
+        fake_xml = etree.fromstring("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <GetCapabilities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xmlns="http://www.opengis.net/oseo/1.0"
+                xsi:schemaLocation="http://www.opengis.net/oseo/1.0
+                    http://schemas.opengis.net/oseo/1.0/oseo.xsd"
+                xmlns:m0="http://www.opengis.net/ows/2.0"
+                updateSequence=""
+                service="OS"
+        >
+            <m0:AcceptVersions>
+                <m0:Version>1.0.0</m0:Version>
+            </m0:AcceptVersions>
+        </GetCapabilities>
+        """.strip())
         server = OseoServer()
-        assert constants.ENCODING.lower() == "utf-8"
-        assert server.OSEO_VERSION == "1.0.0"
+        result = server.parse_xml(fake_xml)
+        parsed_result = etree.QName(etree.fromstring(result.toxml()))
+        assert parsed_result.localname == "GetCapabilities"
+
+    def test_parse_xml_unrecognized(self):
+        fake_xml = etree.fromstring("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Phony xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xmlns="http://www.opengis.net/oseo/1.0"
+                xsi:schemaLocation="http://www.opengis.net/oseo/1.0
+                    http://schemas.opengis.net/oseo/1.0/oseo.xsd"
+                xmlns:m0="http://www.opengis.net/ows/2.0"
+                updateSequence=""
+                service="OS"
+        >
+            <m0:AcceptVersions>
+                <m0:Version>1.0.0</m0:Version>
+            </m0:AcceptVersions>
+        </Phony>
+        """.strip())
+        server = OseoServer()
+        with pytest.raises(errors.NoApplicableCodeError):
+            server.parse_xml(fake_xml)
+
+    @pytest.mark.parametrize("oseo_request, expected", [
+        (oseo.GetCapabilities(), "GetCapabilities")
+    ])
+    def test_get_operation(self):
+        server = OseoServer()
+        server._get_operation()
 
     def test_process_request_no_submit(self):
         fake_request_data = "fake_request"

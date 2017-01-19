@@ -1,22 +1,14 @@
 from __future__ import absolute_import
-import os
-import os.path
-from datetime import datetime
 import logging
-import pytz
 
 from django.http import HttpResponse
 from django.http import HttpResponseForbidden
-from django.http import HttpResponseNotFound
 from django.contrib.auth import authenticate
-from django.contrib.auth import get_user_model
 from django.views.decorators.csrf import csrf_exempt
 from lxml import etree
-from sendfile import sendfile
 
 from .constants import ENCODING
 from . import errors
-from . import models
 from . import utilities
 from . import soap
 from .server import OseoServer
