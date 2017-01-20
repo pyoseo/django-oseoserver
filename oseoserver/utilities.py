@@ -331,6 +331,7 @@ def send_failed_attempt_email(order_id, item_id, message):
 
 
 def send_invalid_request_email(request_data, exception_report):
+    logger.warning("Received invalid request. Notifying admins...")
     request = File(
         StringIO(request_data),
         name="request_data.xml"

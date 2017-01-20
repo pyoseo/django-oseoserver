@@ -16,6 +16,7 @@ from .server import OseoServer
 logger = logging.getLogger(__name__)
 
 
+# TODO: Add authorization controls
 @csrf_exempt
 def oseo_endpoint(request):
     """OSEO endpoint.
@@ -30,62 +31,69 @@ def oseo_endpoint(request):
     if not request.method == "POST":  # OSEO requests must always be POST
         return HttpResponseForbidden()
     soap_version = None
+    soap_fault_code = None
     server = OseoServer()
-    headers = {}
     try:
         request_element = etree.fromstring(request.body)
         soap_version = soap.get_soap_version(request_element)
-        headers = soap.get_http_headers(soap_version)
-        details = soap.unwrap_request(request_element)
-        request_data, username, password, password_attributes = details
-        user = authenticate(username=username, password=password,
-                            password_attributes=password_attributes)
-        logger.debug("user: {}".format(user))
-        if user is None or not user.is_active:
+        request_data = soap.unwrap_request(request_element)[0]
+        logger.debug("user: {}".format(request.user))
+        if request.user is None or not request.user.is_active:
             raise errors.OseoError(
                 code="AuthenticationFailed",
                 text="Invalid or missing identity information"
             )
-        # TODO: Add authorization controls
-        process_response = server.process_request(request_data, user)
+        response = server.process_request(request_data, request.user)
         status_code = 200
-        if soap_version is None:
-            response = process_response
-        else:
-            response = soap.wrap_response(process_response,
-                                          soap_version)
     except errors.OseoError as err:
-        if err.code == "AuthorizationFailed":
-            status_code = 401
-        else:
-            status_code = 400
-        exception_report = server.create_exception_report(
+        response = server.create_exception_report(
             err.code, err.text, err.locator)
-        if soap_version is None:
-            response = exception_report
-        else:
-            soap_fault_code = soap.get_soap_fault_code(err.code)
-            response = soap.wrap_soap_fault(
-                exception_element=exception_report,
-                soap_code=soap_fault_code,
-                soap_version=soap_version
-            )
-        logger.exception("Received invalid request. Notifying admins...")
-        utilities.send_invalid_request_email(
-            request_data=request.body,
-            exception_report=etree.tostring(exception_report,
-                                            pretty_print=True),
-        )
-    except (errors.InvalidSoapVersionError, etree.XMLSyntaxError,
-            errors.ServerError):
-        raise
-    serialized = etree.tostring(response, encoding=ENCODING,
-                                pretty_print=True)
+        status_code = 401 if err.code == "AuthorizationFailed" else 400
+        soap_fault_code = soap.get_soap_fault_code(err.code)
+        #utilities.send_invalid_request_email(
+        #    request_data=request.body,
+        #    exception_report=etree.tostring(response, pretty_print=True),
+        #)
+    wrapped = _wrap_response(response, soap_version=soap_version,
+                             soap_code=soap_fault_code)
+    serialized = etree.tostring(wrapped, encoding=ENCODING, pretty_print=True)
+
     django_response = HttpResponse(serialized)
     django_response.status_code = status_code
-    for k, v in headers.items():
+    for k, v in _get_response_headers(soap_version).items():
         django_response[k] = v
     return django_response
+
+
+def _get_response_headers(soap_version=None):
+    headers = {}
+    if soap_version is not None:
+        headers["Content-Type"] = soap.get_response_content_type(soap_version)
+    return headers
+
+
+def _wrap_response(response_element, soap_version=None, soap_code=None):
+    """Wrap the response in a SOAP envelope, if needed
+
+    Parameters
+    ----------
+    response_element: etree.Element
+        The already processed response
+    soap_version: str, optional
+        Version of SOAP in use
+    soap_code: str, optional
+        SOAP code to use for SOAP faults.
+
+    """
+
+    if soap_code is not None:
+        result = soap.wrap_soap_fault(
+            response_element, soap_code, soap_version)
+    elif soap_version is not None:
+        result = soap.wrap_response(response_element, soap_version)
+    else:
+        result = response_element
+    return result
 
 
 # TODO - This view does not belong in the oseoserver. Order item availability

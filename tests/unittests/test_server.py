@@ -58,13 +58,6 @@ class TestServer(object):
         with pytest.raises(errors.NoApplicableCodeError):
             server.parse_xml(fake_xml)
 
-    @pytest.mark.parametrize("oseo_request, expected", [
-        (oseo.GetCapabilities(), "GetCapabilities")
-    ])
-    def test_get_operation(self):
-        server = OseoServer()
-        server._get_operation()
-
     def test_process_request_no_submit(self):
         fake_request_data = "fake_request"
         fake_user = None

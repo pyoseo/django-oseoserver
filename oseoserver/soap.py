@@ -10,7 +10,27 @@ from .auth import usernametoken
 
 
 def get_soap_version(request_element):
-    """Return a request"s SOAP version"""
+    """Return a request"s SOAP version
+
+    Supported SOAP versions are 1.1 and 1.2.
+
+    Parameters
+    ----------
+    request_element: etree.Element
+        OSEO request to be processed
+
+    Returns
+    -------
+    str or None
+        The detected SOAP version
+
+    Raises
+    ------
+    oseoserver.errors.InvalidSoapVersionError
+        If an invalid SOAP version has been requested
+
+    """
+
     qname = etree.QName(request_element.tag)
     if qname.localname == "Envelope":
         if qname.namespace == NAMESPACES["soap"]:
@@ -40,16 +60,30 @@ def get_soap_fault_code(response_text):
     }.get(response_text)
 
 
-def get_http_headers(soap_version):
-    if soap_version == "1.2":
-        content_type = "application/soap+xml"
-    elif soap_version == "1.1":
-        content_type = "text/xml"
-    else:
-        raise ValueError("Unsupported SOAP version {!r}".format(soap_version))
-    return {
-        "Content-Type": content_type
-    }
+def get_response_content_type(soap_version):
+    """Return the correct response content-type according to the SOAP version.
+
+    Parameters
+    ----------
+    soap_version: str
+        The SOAP version in use
+
+    Returns
+    -------
+    content_type: str
+        HTTP Content-Type header to use for the response.
+
+    """
+
+    try:
+        result = {
+            "1.1": "text/xml",
+            "1.2": "application/soap+xml",
+        }[soap_version]
+    except KeyError:
+        raise InvalidSoapVersionError(
+            "Unsupported SOAP version {!r}".format(soap_version))
+    return result
 
 
 def unwrap_request(request_element):
