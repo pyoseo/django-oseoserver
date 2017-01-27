@@ -16,8 +16,6 @@
 
 from __future__ import absolute_import
 import logging
-import datetime as dt
-import pytz
 
 from django.db import transaction
 import pyxb.bundles.opengis.oseo_1_0 as oseo
@@ -29,23 +27,255 @@ from .. import utilities
 from .. import settings
 from ..utilities import _n, _c
 from ..constants import ENCODING
-from ..constants import DeliveryOption
 from ..constants import DeliveryOptionProtocol
 from ..constants import DeliveryMedium
-from ..constants import OrderType
-from ..constants import OrderStatus
-from ..constants import Priority
-from ..constants import MASSIVE_ORDER_REFERENCE
-from ..constants import StatusNotification
+from ..models import CustomizableItem
+from ..models import Order
+from ..models import SelectedDeliveryOption
 
 logger = logging.getLogger(__name__)
+
+
+def create_order(order_type, delivery_options, order_items, user,
+                 status_notification, priority="", order_reference=None,
+                 order_remark=None, delivery_information=None,
+                 options=None, invoice_address=None,
+                 packaging=None, extension=None):
+    """Persist the already parsed order specification in the database.
+
+    Parameters
+    ----------
+    order_type: constants.OrderType
+        Enumeration object with the type of order being created
+    delivery_options: dict
+        A mapping with the parsed delivery options
+    order_items: list
+        A list of dictionaries that hold the specification for the parsed
+        order items that are being requested in the order
+    user: django.contrib.auth.models.User
+        The django user that placed the order
+    status_notification: constants.StatusNotification
+        Enumeration object with the type of status notification to use
+    priority: constants.Priority
+        Enumeration object with the priority of the order
+    order_reference: str
+        A textual reference for the order
+    order_remark: str
+        A textual remark concerning the order
+    delivery_information
+    options
+    invoice_address
+    packaging
+    extension
+
+    Returns
+    -------
+    ProductOrder or MassiveOrder or SubscriptionOrder or TaskingOrder
+        The corresponding django model class that was created
+
+    """
+
+    initial_status, details = get_order_initial_status(order_type)
+    order = models.Order(
+        status=initial_status,
+        additional_status_info=details,
+        mission_specific_status_info="",
+        remark=order_remark,
+        user=user,
+        order_type=order_type,
+        reference=order_reference,
+        packaging=packaging,
+        priority=priority,
+        status_notification=status_notification
+    )
+    order.full_clean()
+    order.save()
+    for name, value in options.items():
+        option = models.SelectedOption(
+            option=name,
+            value=value,
+            customizable_item=order
+        )
+        option.full_clean()
+        option.save()
+    delivery_option = create_delivery_option(**delivery_options)
+    delivery_option.customizable_item = order
+    delivery_option.save()
+    for ext in extension or []:
+        e = models.Extension(
+            item=order,
+            text=ext
+        )
+        e.full_clean()
+        e.save()
+    # save order?
+    if order.order_type == models.Order.PRODUCT_ORDER:
+        batch = create_product_order_batch(initial_status, *order_items)
+        batch.full_clean()
+        batch.order = order
+        batch.save()
+    else:
+        raise NotImplementedError
+    return order
+
+
+def create_product_order_batch(initial_status, *order_items_spec):
+    batch = models.ProductOrderBatch(status=initial_status)
+    batch.full_clean()
+    batch.save()
+    item_status, item_additional_status_info = get_order_item_initial_status(
+        Order.PRODUCT_ORDER)
+    for item_specification in order_items_spec:
+        spec = item_specification.copy()
+        delivery_spec = spec.pop("delivery_option", {})
+        item = create_order_item(
+            item_status,
+            item_additional_status_info,
+            **spec
+        )
+        item_delivery = create_delivery_option(
+            annotation=delivery_spec.get("annotation"),
+            copies=delivery_spec.get("copies"),
+            special_instructions=delivery_spec.get("special_instructions"),
+            delivery_type=delivery_spec.get("type")
+        )
+        item.selected_delivery_option = item_delivery
+        item_delivery.order_item = item
+        item_delivery.save()
+        batch.items.add(item)
+        batch.save()
+    return batch
+
+
+def create_subscription_order_batch(order, collection, timeslot):
+    raise NotImplementedError
+
+
+def create_order_item(status, item_id, collection,
+                      additional_status_info="",
+                      option=None, scene_selection=None,
+                      order_item_remark="",
+                      identifier=None, payment=None):
+    """Create order items for a batch.
+
+    Parameters
+    ----------
+    status: str
+        OSEO status for the item to be created
+    item_id: str
+    collection: str
+        Collection where the ordered content belongs
+    additional_status_info: str, optional
+        Further details concerninc the status
+    option: dict, optional
+        A mapping with options to be added to the order item
+    scene_selection: dict, optional
+        A mapping with scene selection options to be added to the
+        order item
+    order_item_remark: str, optional
+        Further comments regarding the item
+    identifier: str, optional
+    payment: str, optional
+        Payment metho for the item
+
+    """
+
+    item = models.OrderItem(
+        status=status,
+        additional_status_info=additional_status_info,
+        remark=order_item_remark,
+        collection=collection,
+        identifier=identifier or "",
+        item_id=item_id
+    )
+    item.full_clean()
+    item.save()
+    item_options = option or {}
+    for name, value in item_options.items():
+        # assuming that the option has already been validated
+        selected_option = models.SelectedOption(
+            option=name,
+            value=value,
+            customizable_item=item
+        )
+        selected_option.full_clean()
+        selected_option.save()
+    scene_selection_options = scene_selection or {}
+    for name, value in scene_selection_options.items():
+        scene_option = models.SelectedSceneSelectionOption(
+            option=name,
+            value=value,
+            customizable_item=item
+        )
+        scene_option.full_clean()
+        scene_option.save()
+    if payment is not None:
+        payment = models.SelectedPaymentOption(
+            order_item=item,
+            option=payment
+        )
+        payment.full_clean()
+        payment.save()
+    item.save()
+    return item
+
+
+def create_delivery_option(delivery_type=None, medium=None, shipping=None,
+                           annotation=None, copies=None, protocol=None,
+                           special_instructions=None):
+    """Persist a delivery option in the database."""
+    if delivery_type == SelectedDeliveryOption.MEDIA_DELIVERY:
+        details = ",".join((medium, shipping))
+    else:
+        details = protocol
+    delivery_option = SelectedDeliveryOption(
+        annotation=annotation,
+        copies=copies or 1,
+        special_instructions=special_instructions,
+        delivery_type=delivery_type,
+        delivery_details=details
+    )
+    delivery_option.full_clean()
+    return delivery_option
+
+
+def get_order_initial_status(order_type):
+    initial_status = _get_initial_status(order_type)
+    additional_status_info = {
+        CustomizableItem.ACCEPTED: "Order has been placed in processing queue",
+        CustomizableItem.SUBMITTED: "Order is awaiting approval",
+    }.get(initial_status, "Order has been rejected")
+    return initial_status, additional_status_info
+
+
+def get_order_item_initial_status(order_type):
+    initial_status = _get_initial_status(order_type)
+    additional_status_info = {
+        CustomizableItem.ACCEPTED: "Item has been placed in processing queue",
+        CustomizableItem.SUBMITTED: "Order is awaiting approval",
+    }.get(initial_status,
+          "The Order has been rejected, item won't be processed")
+    return initial_status, additional_status_info
+
+
+def _get_initial_status(order_type):
+    general_order_config_getter = getattr(
+        settings,
+        "get_{order_type}".format(order_type=order_type.lower())
+    )
+    order_config = general_order_config_getter()
+    if order_config.get("automatic_approval", False):
+        status = CustomizableItem.ACCEPTED
+    else:
+        status = CustomizableItem.SUBMITTED
+    return status
 
 
 class Submit(object):
 
     @transaction.atomic
     def __call__(self, request, user):
-        """Implements the OSEO Submit operation.
+        """Implements OSEO Submit operation.
 
         Parameters
         ----------
@@ -78,7 +308,8 @@ class Submit(object):
         # TODO - raise an error if there are no delivery options on the
         # order_specification either at the order or order item levels
         logger.debug("Saving submit request into order database...")
-        order = self.create_order(
+
+        order = create_order(
             order_type=order_spec["order_type"],
             delivery_options=order_spec["delivery_options"],
             order_items=order_spec["order_item"],
@@ -98,115 +329,6 @@ class Submit(object):
         response.orderReference = _n(order.reference)
         return response, order
 
-    def create_order(self, order_type, delivery_options, order_items,
-                     user, status_notification,
-                     priority="", order_reference=None,
-                     order_remark=None, delivery_information=None,
-                     options=None, invoice_address=None,
-                     packaging=None, extension=None):
-        """Persist the already parsed order specification in the database.
-
-        Parameters
-        ----------
-        order_type: constants.OrderType
-            Enumeration object with the type of order being created
-        delivery_options: dict
-            A mapping with the parsed delivery options
-        order_items: list
-            A list of dictionaries that hold the specification for the parsed
-            order items that are being requested in the order
-        user: django.contrib.auth.models.User
-            The django user that placed the order
-        status_notification: constants.StatusNotification
-            Enumeration object with the type of status notification to use
-        priority: constants.Priority
-            Enumeration object with the priority of the order
-        order_reference: str
-            A textual reference for the order
-        order_remark: str
-            A textual remark concerning the order
-        delivery_information
-        options
-        invoice_address
-        packaging
-        extension
-
-        Returns
-        -------
-        ProductOrder or MassiveOrder or SubscriptionOrder or TaskingOrder
-            The corresponding django model class that was created
-
-        """
-
-        generic_order_config = utilities.get_generic_order_config(
-            order_type)
-        if generic_order_config.get("automatic_approval", False):
-            default_status = OrderStatus.ACCEPTED
-            additional_status_info = ("Order is placed in processing queue")
-            item_additional_status_info = ("Order item has been placed in the "
-                                           "processing queue")
-        else:
-            default_status = OrderStatus.SUBMITTED
-            additional_status_info = "Order is awaiting approval"
-            item_additional_status_info = ""
-        OrderModel = {
-            OrderType.PRODUCT_ORDER: models.ProductOrder,
-            OrderType.MASSIVE_ORDER: models.MassiveOrder,
-            OrderType.SUBSCRIPTION_ORDER: models.SubscriptionOrder,
-            OrderType.TASKING_ORDER: models.TaskingOrder,
-        }.get(order_type)
-        order = OrderModel(
-            status=default_status.value,
-            additional_status_info=additional_status_info,
-            mission_specific_status_info="",
-            remark=order_remark,
-            user=user,
-            order_type=order_type.value,
-            reference=order_reference,
-            packaging=packaging,
-            priority=priority.value,
-            status_notification=status_notification.value
-        )
-        if order_type == OrderType.SUBSCRIPTION_ORDER:
-            # get begin and end dates for the subscription
-            item_processor = utilities.import_class(
-                generic_order_config["item_processor"])
-            begin, end = item_processor.get_subscription_duration(options)
-            now = dt.datetime.now(pytz.utc)
-            order.begin_on = begin or now
-            order.end_on = end or now + dt.timedelta(days=365 * 10)  # ten years
-        order.save()
-        # implement InvoiceAddress
-        # implement DeliveryInformation
-        for option_name, option_value in options.items():
-            selected_option = models.SelectedOption(option=option_name,
-                                                    value=option_value,
-                                                    customizable_item=order)
-            selected_option.save()
-        if delivery_options["type"] == DeliveryOption.MEDIA_DELIVERY:
-            delivery_details = ",".join(
-                (delivery_options["medium"], delivery_options["shipping"]))
-        else:
-            delivery_details = delivery_options["protocol"].value
-        sdo = models.SelectedDeliveryOption(
-            customizable_item=order,
-            annotation=delivery_options["annotation"],
-            copies=delivery_options["copies"],
-            special_instructions=delivery_options["special_instructions"],
-            delivery_type=delivery_options["type"].value,
-            delivery_details=delivery_details
-        )
-        sdo.save()
-        order.save()
-        order.create_batch(
-            order.status,
-            item_additional_status_info,
-            *order_items
-        )
-        for ext in extension or []:
-            e = models.Extension(item=order, text=ext)
-            e.save()
-        return order
 
     def get_collection_id(self, item_id, item_processor_path):
         """Determine the collection identifier for the specified item.
@@ -300,8 +422,8 @@ class Submit(object):
         spec["order_remark"] = _c(order_specification.orderRemark)
         spec["packaging"] = self._validate_packaging(
             order_specification.packaging)
-        spec["priority"] = Priority(
-            _c(order_specification.priority) or Priority.STANDARD.value)
+        spec["priority"] = models.Order.Priority(
+            _c(order_specification.priority) or models.Order.Priority.STANDARD)
         spec["delivery_information"] = self.get_delivery_information(
             order_specification.deliveryInformation)
         spec["invoice_address"] = self.get_invoice_address(
@@ -338,10 +460,10 @@ class Submit(object):
         }
 
         item_identifier = None
-        if order_type in (OrderType.PRODUCT_ORDER, OrderType.MASSIVE_ORDER):
+        if order_type in (Order.PRODUCT_ORDER, Order.MASSIVE_ORDER):
             item_identifier = _c(requested_item.productId.identifier)
             item["identifier"] = item_identifier
-        elif order_type == OrderType.TASKING_ORDER:
+        elif order_type == Order.TASKING_ORDER:
             item["tasking_id"] = None  # TODO: implement this
         generic_order_config = utilities.get_generic_order_config(order_type)
         collection_config = self.validate_requested_collection(
@@ -364,14 +486,14 @@ class Submit(object):
 
     def validate_requested_collection(self, order_type, generic_order_config,
                                       requested_item):
-        if order_type in (OrderType.PRODUCT_ORDER, OrderType.MASSIVE_ORDER):
+        if order_type in (Order.PRODUCT_ORDER, Order.MASSIVE_ORDER):
             collection_id = requested_item.productId.collectionId
             if collection_id is None:
                 collection_id = self.get_collection_id(
                     requested_item.productId.identifier,
                     generic_order_config["item_processor"]
                 )
-        elif order_type == OrderType.SUBSCRIPTION_ORDER:
+        elif order_type == Order.SUBSCRIPTION_ORDER:
             collection_id = requested_item.collectionId
         else:  # tasking order
             raise NotImplementedError
@@ -381,12 +503,12 @@ class Submit(object):
         if is_enabled:
             result = collection_config
         else:
-            if order_type in (OrderType.PRODUCT_ORDER,
-                              OrderType.MASSIVE_ORDER):
+            if order_type in (Order.PRODUCT_ORDER,
+                              Order.MASSIVE_ORDER):
                 raise errors.ProductOrderingNotSupportedError()
-            elif order_type == OrderType.SUBSCRIPTION_ORDER:
+            elif order_type == Order.SUBSCRIPTION_ORDER:
                 raise errors.SubscriptionNotSupportedError()
-            elif order_type == OrderType.TASKING_ORDER:
+            elif order_type == Order.TASKING_ORDER:
                 raise errors.FutureProductNotSupportedError()
             else:
                 raise errors.OseoServerError(
@@ -405,12 +527,12 @@ class Submit(object):
 
         generic_config = utilities.get_generic_order_config(order_type)
         if not generic_config.get("enabled", False):
-            if order_type in (OrderType.PRODUCT_ORDER,
-                              OrderType.MASSIVE_ORDER):
+            if order_type in (Order.PRODUCT_ORDER,
+                              Order.MASSIVE_ORDER):
                 raise errors.ProductOrderingNotSupportedError()
-            elif order_type == OrderType.SUBSCRIPTION_ORDER:
+            elif order_type == Order.SUBSCRIPTION_ORDER:
                 raise errors.SubscriptionNotSupportedError()
-            elif order_type == OrderType.TASKING_ORDER:
+            elif order_type == Order.TASKING_ORDER:
                 raise errors.FutureProductNotSupportedError()
             else:
                 raise errors.OseoServerError("Invalid order type: "
@@ -425,10 +547,10 @@ class Submit(object):
         :return:
         """
 
-        if request.statusNotification != StatusNotification.NONE.value:
+        if request.statusNotification != Order.NONE:
             raise NotImplementedError("Status notifications are "
                                       "not supported")
-        return StatusNotification(request.statusNotification)
+        return request.statusNotification
 
     def _get_delivery_address(self, delivery_address_type):
         address = {
@@ -467,17 +589,17 @@ class Submit(object):
 
         Returns
         -------
-        constants.OrderType
-            The enumeration value for the requested order type
+        str
+            The reuqested order type
 
         """
 
-        requested = OrderType(order_specification.orderType)
-        if requested == OrderType.PRODUCT_ORDER:
+        order_type = order_specification.orderType
+        if order_type == Order.PRODUCT_ORDER:
             reference = _c(order_specification.orderReference)
-            if reference == MASSIVE_ORDER_REFERENCE:
-                requested = OrderType.MASSIVE_ORDER
-        return requested
+            if reference == Order.MASSIVE_ORDER_REFERENCE:
+                order_type = Order.MASSIVE_ORDER
+        return order_type
 
     def _validate_collection_id(self, collection_id):
         for collection_config in settings.get_collections():
@@ -496,13 +618,13 @@ class Submit(object):
             md = requested_delivery_options.mediaDelivery
             if oda is not None:
                 delivery = {
-                    "type": DeliveryOption.ONLINE_DATA_ACCESS,
+                    "type": SelectedDeliveryOption.ONLINE_DATA_ACCESS,
                     "protocol": self._get_online_data_access_delivery_options(
                         oda, order_config)
                 }
             elif odd is not None:
                 delivery = {
-                    "type": DeliveryOption.ONLINE_DATA_DELIVERY,
+                    "type": SelectedDeliveryOption.ONLINE_DATA_DELIVERY,
                     "protocol": self._get_online_data_delivery_options(
                         odd, order_config)
                 }
@@ -510,7 +632,7 @@ class Submit(object):
                 medium, shipping = self._get_media_delivery_options(
                     md, order_config)
                 delivery = {
-                    "type": DeliveryOption.MEDIA_DELIVERY,
+                    "type": SelectedDeliveryOption.MEDIA_DELIVERY,
                     "medium": medium,
                     "shipping_instructions": shipping
                 }

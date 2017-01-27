@@ -4,7 +4,6 @@ import enum
 
 ENCODING = "utf-8"
 
-MASSIVE_ORDER_REFERENCE = 'Massive order'
 
 NAMESPACES = {
     "soap": "http://www.w3.org/2003/05/soap-envelope",
@@ -15,53 +14,6 @@ NAMESPACES = {
     "oseo": "http://www.opengis.net/oseo/1.0",
     "xml": "http://www.w3.org/XML/1998/namespace",
 }
-
-
-class OrderType(enum.Enum):
-
-    PRODUCT_ORDER = "PRODUCT_ORDER"
-    SUBSCRIPTION_ORDER = "SUBSCRIPTION_ORDER"
-    MASSIVE_ORDER = "MASSIVE_ORDER"
-    TASKING_ORDER = "TASKING_ORDER"
-
-
-class OrderStatus(enum.Enum):
-    SUBMITTED = "Submitted"
-    ACCEPTED = "Accepted"
-    IN_PRODUCTION = "InProduction"
-    SUSPENDED = "Suspended"
-    CANCELLED = "Cancelled"
-    COMPLETED = "Completed"
-    FAILED = "Failed"
-    TERMINATED = "Terminated"
-    DOWNLOADED = "Downloaded"
-
-
-class Priority(enum.Enum):
-
-    STANDARD = "STANDARD"
-    FAST_TRACK = "FAST_TRACK"
-
-
-class StatusNotification(enum.Enum):
-
-    NONE = 'None'
-    FINAL = 'Final'
-    ALL = 'All'
-
-
-class Presentation(enum.Enum):
-
-    BRIEF = "brief"
-    FULL = "full"
-
-
-class DeliveryOption(enum.Enum):
-
-    MEDIA_DELIVERY = "mediadelivery"
-    ONLINE_DATA_ACCESS = "onlinedataaccess"
-    ONLINE_DATA_DELIVERY = "onlinedatadelivery"
-
 
 class DeliveryOptionProtocol(enum.Enum):
 
@@ -99,8 +51,54 @@ class DeliveryMethod(enum.Enum):
     OTHER = "other"
 
 
-class Packaging(enum.Enum):
+#MASSIVE_ORDER_REFERENCE = 'Massive order'
 
-    ZIP = "zip"
+#class OrderType(enum.Enum):
+#
+#    PRODUCT_ORDER = "PRODUCT_ORDER"
+#    SUBSCRIPTION_ORDER = "SUBSCRIPTION_ORDER"
+#    MASSIVE_ORDER = "MASSIVE_ORDER"
+#    TASKING_ORDER = "TASKING_ORDER"
 
 
+#class OrderStatus(enum.Enum):
+#    SUBMITTED = "Submitted"
+#    ACCEPTED = "Accepted"
+#    IN_PRODUCTION = "InProduction"
+#    SUSPENDED = "Suspended"
+#    CANCELLED = "Cancelled"
+#    COMPLETED = "Completed"
+#    FAILED = "Failed"
+#    TERMINATED = "Terminated"
+#    DOWNLOADED = "Downloaded"
+
+
+#class Priority(enum.Enum):
+#
+#    STANDARD = "STANDARD"
+#    FAST_TRACK = "FAST_TRACK"
+
+
+#class StatusNotification(enum.Enum):
+#
+#    NONE = 'None'
+#    FINAL = 'Final'
+#    ALL = 'All'
+
+
+#class Presentation(enum.Enum):
+#
+#    BRIEF = "brief"
+#    FULL = "full"
+
+
+#class DeliveryOption(enum.Enum):
+#
+#    MEDIA_DELIVERY = "mediadelivery"
+#    ONLINE_DATA_ACCESS = "onlinedataaccess"
+#    ONLINE_DATA_DELIVERY = "onlinedatadelivery"
+
+
+#class Packaging(enum.Enum):
+#
+#    ZIP = "zip"

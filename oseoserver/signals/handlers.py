@@ -22,44 +22,24 @@ import logging
 
 from django.dispatch import receiver
 from django.db.models.signals import post_save, post_init, pre_save
-from django.contrib.auth.models import User
-from django.template.loader import render_to_string
-from django.core.files import File
 
 from . import signals
-from .. import models
+from ..models import CustomizableItem
+from ..models import Order
+from ..models import OrderItem
 from .. import utilities
-from ..constants import OrderStatus
-from ..constants import OrderType
-from ..constants import StatusNotification
 
 logger = logging.getLogger(__name__)
 
 
-@receiver(post_init, sender=models.TaskingOrder, weak=False,
-          dispatch_uid='id_for_get_old_status_tasking_order')
-@receiver(post_init, sender=models.SubscriptionOrder, weak=False,
-          dispatch_uid='id_for_get_old_status_subscription_order')
-@receiver(post_init, sender=models.MassiveOrder, weak=False,
-          dispatch_uid='id_for_get_old_status_massive_order')
-@receiver(post_init, sender=models.ProductOrder, weak=False,
-          dispatch_uid='id_for_get_old_status_product_order')
-@receiver(post_init, sender=models.Order, weak=False,
+@receiver(post_init, sender=Order, weak=False,
           dispatch_uid='id_for_get_old_status_order')
 def get_old_status_order(sender, **kwargs):
     order = kwargs['instance']
     order.old_status = order.status
 
 
-@receiver(pre_save, sender=models.TaskingOrder, weak=False,
-          dispatch_uid='id_for_update_status_changed_on_tasking_order')
-@receiver(pre_save, sender=models.SubscriptionOrder, weak=False,
-          dispatch_uid='id_for_update_status_changed_on_subscription_order')
-@receiver(pre_save, sender=models.MassiveOrder, weak=False,
-          dispatch_uid='id_for_update_status_changed_on_massive_order')
-@receiver(pre_save, sender=models.ProductOrder, weak=False,
-          dispatch_uid='id_for_update_status_changed_on_product_order')
-@receiver(pre_save, sender=models.Order, weak=False,
+@receiver(pre_save, sender=Order, weak=False,
           dispatch_uid='id_for_update_status_changed_on_order')
 def update_status_changed_on_order(sender, **kwargs):
     order = kwargs['instance']
@@ -69,27 +49,27 @@ def update_status_changed_on_order(sender, **kwargs):
                                                  old_status=order.old_status,
                                                  new_status=order.status)
         sig = {
-            OrderStatus.SUBMITTED.value: signals.order_submitted,
-            OrderStatus.ACCEPTED.value: signals.order_accepted,
-            OrderStatus.IN_PRODUCTION.value: signals.order_in_production,
-            OrderStatus.FAILED.value: signals.order_failed,
-            OrderStatus.COMPLETED.value: signals.order_completed,
-            OrderStatus.DOWNLOADED.value: signals.order_downloaded,
-            OrderStatus.CANCELLED.value: signals.order_cancelled,
-            OrderStatus.TERMINATED.value: signals.order_terminated,
+            CustomizableItem.SUBMITTED: signals.order_submitted,
+            CustomizableItem.ACCEPTED: signals.order_accepted,
+            CustomizableItem.IN_PRODUCTION: signals.order_in_production,
+            CustomizableItem.FAILED: signals.order_failed,
+            CustomizableItem.COMPLETED: signals.order_completed,
+            CustomizableItem.DOWNLOADED: signals.order_downloaded,
+            CustomizableItem.CANCELLED: signals.order_cancelled,
+            CustomizableItem.TERMINATED: signals.order_terminated,
         }[order.status]
         sig.send_robust(sender=sender, instance=order)
         order.old_status = order.status
 
 
-@receiver(post_init, sender=models.OrderItem, weak=False,
+@receiver(post_init, sender=OrderItem, weak=False,
           dispatch_uid='id_for_get_old_status_order_item')
 def get_old_status_order_item(sender, **kwargs):
     order_item = kwargs['instance']
     order_item.old_status = order_item.status
 
 
-@receiver(pre_save, sender=models.OrderItem, weak=False,
+@receiver(pre_save, sender=OrderItem, weak=False,
           dispatch_uid='id_for_update_status_changed_on_order_item')
 def update_status_changed_on_by_order_item(sender, **kwargs):
     order_item = kwargs['instance']
@@ -98,7 +78,7 @@ def update_status_changed_on_by_order_item(sender, **kwargs):
         order_item.status_changed_on = dt.datetime.now(pytz.utc)
 
 
-#@receiver(post_save, sender=models.OrderItem, weak=False,
+#@receiver(post_save, sender=OrderItem, weak=False,
 #          dispatch_uid='id_for_update_batch')
 #def update_batch(sender, **kwargs):
 #    order_item = kwargs["instance"]
@@ -125,15 +105,15 @@ def handle_order_status_change(sender, **kwargs):
     """
 
     order = kwargs["instance"]
-    old = OrderStatus(kwargs["old_status"])
-    new = OrderStatus(kwargs["new_status"])
-    if order.status_notification == StatusNotification.ALL.value:
+    old = kwargs["old_status"]
+    new = kwargs["new_status"]
+    if order.status_notification == Order.ALL:
         # send and OSEO notification
         print("Order {0} status has changed from {1.value} "
               "to {2.value}".format(order, old, new))
-    elif order.status_notification == StatusNotification.FINAL.value:
-        if new in (OrderStatus.CANCELLED, OrderStatus.COMPLETED,
-                   OrderStatus.FAILED, OrderStatus.TERMINATED):
+    elif order.status_notification == Order.FINAL:
+        if new in (CustomizableItem.CANCELLED, CustomizableItem.COMPLETED,
+                   CustomizableItem.FAILED, CustomizableItem.TERMINATED):
             # send an OSEO notification
             print("Order {0} has reached a FINAL status of "
                   "{1.value}".format(order, old))
@@ -143,10 +123,9 @@ def handle_order_status_change(sender, **kwargs):
           dispatch_uid='id_for_handle_order_submission')
 def handle_order_submission(sender, **kwargs):
     order = kwargs["instance"]
-    generic_order_config = utilities.get_generic_order_config(
-        OrderType(order.order_type))
+    generic_order_config = utilities.get_generic_order_config(order.order_type)
     automatic_approval = generic_order_config.get("automatic_approval", False)
-    if order.status == OrderStatus.SUBMITTED.value and not automatic_approval:
+    if order.status == CustomizableItem.SUBMITTED and not automatic_approval:
         # send email asking admins to moderate the order
         print("Order {} must be moderated by an admin before continuing to "
               "be processed".format(order))

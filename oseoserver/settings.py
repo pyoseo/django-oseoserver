@@ -9,20 +9,11 @@ def _get_setting(parameter, default_value):
     return getattr(settings, parameter, default_value)
 
 
-#def get_authentication_class():
-#    return _get_setting("OSEOSERVER_AUTHENTICATION_CLASS",
-#                        "oseoserver.auth.noop.NoAuthentication")
-
-
 def get_processing_class():
     return _get_setting(
         "OSEOSERVER_PROCESSING_CLASS",
         "oseoserver.orderpreparation.ExampleOrderProcessor"
     )
-
-
-def get_site_domain():
-    return _get_setting("OSEOSERVER_SITE_DOMAIN", "example.com")
 
 
 def get_max_order_items():

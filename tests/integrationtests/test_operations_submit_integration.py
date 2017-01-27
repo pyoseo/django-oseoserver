@@ -19,57 +19,54 @@ pytestmark = pytest.mark.integration
 
 class TestSubmitOperation(object):
 
-    def test_validate_order_item_no_options_no_delivery(self, settings):
-        col_id = "fakeid"
-        col_name = "dummy collection"
-        settings.OSEOSERVER_COLLECTIONS = [
-            {
-                "name": col_name,
-                "collection_identifier": col_id,
-                "product_order": {"enabled": True}
-            }
-        ]
-        requested_item = oseo.CommonOrderItemType(
-            itemId="dummy item id1",
-            productOrderOptionsId="dummy productorderoptionsid1",
-            orderItemRemark="dummy item remark1",
-            productId=oseo.ProductIdType(
-                identifier="dummy catalog identifier1",
-                collectionId=col_id
-            )
-        )
-        order_type = OrderType.PRODUCT_ORDER
+    @pytest.mark.parametrize("collection, options, delivery_protocol", [
+        (
+            {"id": "fake_id", "name": "dummy_collection"},
+            [],
+            None,
+        ),
+        (
+            {"id": "fake_id", "name": "dummy_collection"},
+            [
+                {"name": "fakeoption", "value": "fakevalue"}
+            ],
+            None,
+        ),
+        (
+                {"id": "fake_id", "name": "dummy_collection"},
+                [],
+                "ftp",
+        ),
+        (
+                {"id": "fake_id", "name": "dummy_collection"},
+                [
+                    {"name": "fakeoption", "value": "fakevalue"}
 
-        op = submit.Submit()
-        item_spec = op.validate_order_item(requested_item, order_type)
-        assert item_spec["item_id"] == requested_item.itemId
-        assert len(item_spec["option"]) == 0
-        assert item_spec["delivery_options"] is None
-        assert item_spec["collection"] == col_name
-        assert item_spec["identifier"] == requested_item.productId.identifier
-
-    def test_validate_order_item_options_no_delivery(self, settings):
-        """Validates an orderItem featuring valid processing options."""
-        col_id = "fakeid"
-        col_name = "dummy collection"
-        option_name = "fakeoption"
-        option_value = "fakevalue"
+                ],
+                "ftp",
+        ),
+    ])
+    def test_validate_order_item(self, settings, collection, options,
+                                 delivery_protocol):
+        settings.DEBUG = True
+        settings.OSEOSERVER_ONLINE_DATA_ACCESS_OPTIONS = []
+        if delivery_protocol is not None:
+            settings.OSEOSERVER_ONLINE_DATA_ACCESS_OPTIONS.append(
+                {"protocol": delivery_protocol})
         settings.OSEOSERVER_PROCESSING_OPTIONS = [
-            {
-                "name": option_name
-            }
-        ]
+            {"name": opt["name"]} for opt in options]
         settings.OSEOSERVER_PRODUCT_ORDER = {
             "item_processor": "oseoserver.orderpreparation."
                               "exampleorderprocessor.ExampleOrderProcessor"
         }
         settings.OSEOSERVER_COLLECTIONS = [
             {
-                "name": col_name,
-                "collection_identifier": col_id,
+                "name": collection["name"],
+                "collection_identifier": collection["id"],
                 "product_order": {
                     "enabled": True,
-                    "options": [option_name]
+                    "options": [opt["name"] for opt in options],
+                    "online_data_access_options": [delivery_protocol],
                 }
             }
         ]
@@ -79,71 +76,38 @@ class TestSubmitOperation(object):
             orderItemRemark="dummy item remark1",
             productId=oseo.ProductIdType(
                 identifier="dummy catalog identifier1",
-                collectionId=col_id
+                collectionId=collection["id"]
             ),
             option=[
                 BIND(oseo.ParameterData(encoding="XMLEncoding",
-                                        values=xsd.anyType())),
+                                        values=xsd.anyType()))
             ],
         )
-        requested_item = _add_item_options(
-            requested_item,
-            "oseo:option[1]/oseo:ParameterData/oseo:values",
-            **{option_name: option_value}
-        )
+        if delivery_protocol is not None:
+            requested_item.deliveryOptions = oseo.DeliveryOptionsType(
+                onlineDataAccess=BIND(protocol=delivery_protocol))
+        for index in range(len(options)):
+            xpath_expression = (
+                "oseo:option[{0}]/oseo:ParameterData/"
+                "oseo:values".format(index + 1)
+            )
+            requested_item = _add_item_options(
+                requested_item, xpath_expression, options[index])
         order_type = OrderType.PRODUCT_ORDER
-
-        op = submit.Submit()
-        item_spec = op.validate_order_item(requested_item, order_type)
+        operation = submit.Submit()
+        item_spec = operation.validate_order_item(requested_item, order_type)
         print("item_spec: {}".format(item_spec))
         assert item_spec["item_id"] == requested_item.itemId
-        assert item_spec["option"] == {option_name: option_value}
-        assert item_spec["delivery_options"] is None
-        assert item_spec["collection"] == col_name
+        assert item_spec["collection"] == collection["name"]
         assert item_spec["identifier"] == requested_item.productId.identifier
-
-    @pytest.mark.parametrize("online_data_access_option", ["http", "ftp"])
-    def test_validate_order_item_no_options_delivery_online_data_access(
-            self, online_data_access_option, settings):
-        """Validates an orderItem featuring valid delivery options."""
-
-        col_id = "fakeid"
-        col_name = "dummy collection"
-        settings.OSEOSERVER_ONLINE_DATA_ACCESS_OPTIONS = [
-            online_data_access_option]
-        settings.OSEOSERVER_COLLECTIONS = [
-            {
-                "name": col_name,
-                "collection_identifier": col_id,
-                "product_order": {
-                    "enabled": True,
-                    "online_data_access_options": [online_data_access_option]
-                }
-            }
-        ]
-        requested_item = oseo.CommonOrderItemType(
-            itemId="dummy item id1",
-            productOrderOptionsId="dummy productorderoptionsid1",
-            orderItemRemark="dummy item remark1",
-            productId=oseo.ProductIdType(
-                identifier="dummy catalog identifier1",
-                collectionId=col_id
-            ),
-            deliveryOptions=oseo.DeliveryOptionsType(
-                onlineDataAccess=BIND(protocol=online_data_access_option))
-        )
-        order_type = OrderType.PRODUCT_ORDER
-
-        op = submit.Submit()
-        item_spec = op.validate_order_item(requested_item, order_type)
-        assert item_spec["item_id"] == requested_item.itemId
-        assert item_spec["delivery_options"][
-                   "type"] == DeliveryOption.ONLINE_DATA_ACCESS
-        assert item_spec["delivery_options"][
-                   "protocol"] == DeliveryOptionProtocol(
-            online_data_access_option)
-        assert item_spec["collection"] == col_name
-        assert item_spec["identifier"] == requested_item.productId.identifier
+        assert len(item_spec["option"]) == len(options)
+        for item in options:
+            assert item["value"] == item_spec["option"][item["name"]]
+        if delivery_protocol is None:
+            assert item_spec["delivery_options"] is None
+        else:
+            assert item_spec["delivery_options"]["protocol"].value == (
+                delivery_protocol)
 
     def test_process_order_specification(self, settings):
         col_id = "fake collection id"
@@ -234,10 +198,10 @@ def _add_order_specification_options(order_spec, xpath_expression, **options):
     return order_spec_oseo
 
 
-def _add_item_options(order_item, xpath_expression, **options):
+def _add_item_options(order_item, xpath_expression, option):
     """Add options to orderItem elements
 
-    This function exists in order to overcome dificulties with adding
+    This function exists in order to overcome difficulties with adding
     arbitrary XML elements using pyxb.
 
     """
@@ -251,9 +215,8 @@ def _add_item_options(order_item, xpath_expression, **options):
     values = item_element.xpath(xpath_expression,
                                   namespaces=constants.NAMESPACES)
     for value in values:
-        for option_name, option_value in options.items():
-            option_element = etree.SubElement(value, option_name)
-            option_element.text = option_value
+        option_element = etree.SubElement(value, option["name"])
+        option_element.text = option["value"]
     submit_oseo = _add_item_to_skeleton_request(item_element)
     order_item_oseo = submit_oseo.orderSpecification.orderItem[0]
     return order_item_oseo

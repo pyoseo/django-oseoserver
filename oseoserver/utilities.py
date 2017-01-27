@@ -16,21 +16,10 @@
 Some utility functions for pyoseo
 """
 
-try:
-    from io import StringIO
-except ImportError:  # python2
-    from StringIO import StringIO
 import importlib
 import logging
 
 #from celery.utils import mail
-from django.conf import settings as django_settings
-from django.contrib.auth import get_user_model
-from django.core.files import File
-from django.core.urlresolvers import reverse
-from django.template.loader import render_to_string
-from html2text import html2text
-from mailqueue.models import MailerMessage
 #from pygments import highlight
 #from pygments.lexers import PythonLexer
 #from pygments.formatters import HtmlFormatter
@@ -47,10 +36,15 @@ def import_class(python_path, *instance_args, **instance_kwargs):
     """
 
     module_path, sep, class_name = python_path.rpartition('.')
-    the_module = importlib.import_module(module_path)
-    the_class = getattr(the_module, class_name)
-    instance = the_class(*instance_args, **instance_kwargs)
-    return instance
+    try:
+        the_module = importlib.import_module(module_path)
+        the_class = getattr(the_module, class_name)
+        instance = the_class(*instance_args, **instance_kwargs)
+    except ImportError as err:
+        raise errors.ServerError(
+            "Invalid configuration: {0}".format(python_path))
+    else:
+        return instance
 
 
 def get_generic_order_config(order_type):
@@ -201,192 +195,22 @@ def get_item_processor(customizable_item):
 
 
 # FIXME: Remove this function, it is not needed anymore
-def get_custom_code(generic_order_configuration, processing_step):
-    item_processor = generic_order_configuration["processor"]
-    processing_class = item_processor.python_path
-    params = item_processor.export_params(processing_step)
-    logger.debug('processing_class: {}'.format(processing_class))
-    logger.debug('params: {}'.format(params))
-    return processing_class, params
+#def get_custom_code(generic_order_configuration, processing_step):
+#    item_processor = generic_order_configuration["processor"]
+#    processing_class = item_processor.python_path
+#    params = item_processor.export_params(processing_step)
+#    logger.debug('processing_class: {}'.format(processing_class))
+#    logger.debug('params: {}'.format(params))
+#    return processing_class, params
+#
+#
+## FIXME: Remove this function, it is not needed anymore
+#def get_processor(order_type, processing_step,
+#                  *instance_args, **instance_kwargs):
+#    processing_class, params = get_custom_code(order_type, processing_step)
+#    instance = import_class(processing_class, *instance_args, **instance_kwargs)
+#    return instance, params
 
-
-# FIXME: Remove this function, it is not needed anymore
-def get_processor(order_type, processing_step,
-                  *instance_args, **instance_kwargs):
-    processing_class, params = get_custom_code(order_type, processing_step)
-    instance = import_class(processing_class, *instance_args, **instance_kwargs)
-    return instance, params
-
-
-def send_moderation_email(order):
-    domain = settings.get_site_domain()
-    moderation_uri = reverse(
-        'admin:oseoserver_orderpendingmoderation_changelist')
-    url = "http://{}{}".format(domain, moderation_uri)
-    template = "order_waiting_moderation.html"
-    context = {
-        "order": order,
-        "moderation_url": url,
-    }
-    msg = render_to_string(template, context)
-    subject = "Copernicus Global Land Service - {} {} awaits " \
-              "moderation".format(order.order_type, order.id)
-    UserModel = get_user_model()
-    recipients = UserModel.objects.filter(is_staff=True).exclude(email="")
-    send_email(subject, msg, recipients, html=True)
-
-
-def send_cleaning_error_email(order_type, file_paths, error):
-    details = "\n".join(file_paths)
-    msg = ("Deleting expired files from {} has failed deleting the following "
-           "files:\n\n{}\n\nThe error was:\n\n{}".format(order_type.name,
-                                                         details,
-                                                         error))
-    UserModel = get_user_model()
-    send_email(
-        "Error deleting expired files",
-        msg,
-        UserModel.objects.filter(is_staff=True).exclude(email="")
-    )
-
-
-def send_batch_packaging_failed_email(batch, error):
-    msg = ("There has been an error packaging batch {}. The error "
-          "was:\n\n\{}".format(batch, error))
-    UserModel = get_user_model()
-    send_email(
-        "Error packaging batch {}".format(batch),
-        msg,
-        UserModel.objects.filter(is_staff=True).exclude(email="")
-    )
-
-
-def send_subscription_moderated_email(order, approved, recipients,
-                                      acceptance_details="",
-                                      rejection_details=""):
-
-    collections = [i.collection for i in
-                   order.batches.first().order_items.all()]
-    collections = []
-    for item in order.batches.first().order_items.all():
-        collections.append((i.collection, i.selected_options.all()))
-    template = "subscription_moderated.html"
-    context = {
-        "order": order,
-        "collections": collections,
-        "approved": approved,
-        "details": acceptance_details if approved else rejection_details,
-        }
-    subject = "Copernicus Global Land Service - Subscription has " \
-              "been {}".format("accepted" if approved else "rejected")
-    msg = render_to_string(template, context)
-    send_email(subject, msg, recipients, html=True)
-
-
-def send_subscription_batch_available_email(batch):
-    urls = []
-    collections = set()
-    for oi in batch.order_items.all():
-        for oseo_file in oi.files.all():
-            urls.append(oseo_file.url)
-            collections.add(oi.collection)
-    context = {
-        "batch": batch,
-        "urls": urls,
-        "collections": collections,
-    }
-    template = "subscription_batch_available.html"
-    subject = "Copernicus Global Land Service - Subscription files available"
-    msg = render_to_string(template, context)
-    recipients = [batch.order.user]
-    send_email(subject, msg, recipients, html=True)
-
-
-def send_product_batch_available_email(batch):
-    urls = []
-    for oi in batch.order_items.all():
-        for oseo_file in oi.files.all():
-            urls.append(oseo_file.url)
-    context = {
-        "batch": batch,
-        "urls": urls,
-        }
-    template = "normal_product_batch_available.html"
-    subject = "Copernicus Global Land Service - Order {} available".format(
-        batch.order.id)
-    msg = render_to_string(template, context)
-    recipients = [batch.order.user]
-    send_email(subject, msg, recipients, html=True)
-
-
-def send_failed_attempt_email(order_id, item_id, message):
-    full_message = "Order: {}\n\tOrderItem: {}\n\n\t".format(
-        order_id, item_id)
-    full_message += message
-    subject = ("Copernicus Global Land Service - Unsuccessful processing "
-               "attempt")
-    UserModel = get_user_model()
-    recipients = UserModel.objects.filter(is_staff=True).exclude(email="")
-    send_email(subject, full_message, recipients, html=True)
-
-
-def send_invalid_request_email(request_data, exception_report):
-    logger.warning("Received invalid request. Notifying admins...")
-    request = File(
-        StringIO(request_data),
-        name="request_data.xml"
-    )
-    exception_report = File(
-        StringIO(exception_report),
-        name="exception_report.xml"
-    )
-    template = "invalid_request.html"
-    msg = render_to_string(template)
-    subject = ("Copernicus Global Land Service - Received invalid request")
-    recipients = get_user_model().objects.filter(
-        is_staff=True).exclude(email="")
-    send_email(
-        subject, msg, recipients,
-        html=True, attachments=[request, exception_report]
-    )
-
-
-def send_email(subject, message, recipients, html=False, attachments=None):
-    """Send emails
-
-    Parameters
-    ----------
-    subject: str
-        The subject of the email
-    message: str
-        Body of the email
-    recipients: list
-        An iterable with django users representing the recipients of the email
-    html: bool, optional
-        Whether the e-mail should be sent in HTML or plain text
-    """
-
-    already_emailed = []
-    for recipient in recipients:
-        address = recipient.email
-        if address != "" and address not in already_emailed:
-            msg = MailerMessage(
-                subject=subject,
-                to_address=address,
-                from_address=django_settings.EMAIL_HOST_USER,
-                app="oseoserver"
-            )
-            if html:
-                text_content = html2text(message)
-                msg.content = text_content
-                msg.html_content = message
-            else:
-                msg.content = message
-            if attachments is not None:
-                for a in attachments:
-                    msg.add_attachment(a)
-            msg.save()
-            already_emailed.append(address)
 
 def _c(value):
     """

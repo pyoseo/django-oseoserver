@@ -1,4 +1,4 @@
-# Copyright 2014 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,9 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Database models for pyoseo
-"""
+"""Database models for oseoserver."""
+
+# TODO - Investigate whether some model methods may be tunred into mixins or helper functions to promote code reuse
 
 from __future__ import absolute_import
 import datetime as dt
@@ -24,33 +24,18 @@ import traceback
 import logging
 
 from django.db import models
-from django.core.exceptions import ObjectDoesNotExist
 from django.conf import settings as django_settings
+from django.utils.encoding import python_2_unicode_compatible
 import pytz
 from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
-from . import errors
+from . import managers
 from . import settings
 from . import utilities
-from .constants import DeliveryOption
-from .constants import MASSIVE_ORDER_REFERENCE
-from .constants import OrderStatus
-from .constants import OrderType
-from .constants import Packaging
-from .constants import Presentation
-from .constants import Priority
-from .constants import StatusNotification
 from .utilities import _n
 
-
 logger = logging.getLogger(__name__)
-
-COLLECTION_CHOICES = [
-    (c["name"], c["name"]) for c in settings.get_collections()]
-
-STATUS_CHOICES = [
-    (status.value, status.value) for status in OrderStatus]
 
 
 class AbstractDeliveryAddress(models.Model):
@@ -86,173 +71,70 @@ class AbstractDeliveryAddress(models.Model):
         return delivery_address
 
 
-class Batch(models.Model):
-    # subFunction values for DescribeResultAccess operation
-    ALL_READY = "allReady"
-    NEXT_READY = "nextReady"
+@python_2_unicode_compatible
+class CustomizableItem(models.Model):
+    SUBMITTED = "Submitted"
+    ACCEPTED = "Accepted"
+    IN_PRODUCTION = "InProduction"
+    SUSPENDED = "Suspended"
+    CANCELLED = "Cancelled"
+    COMPLETED = "Completed"
+    FAILED = "Failed"
+    TERMINATED = "Terminated"
+    DOWNLOADED = "Downloaded"
+    STATUS_CHOICES = [
+        (SUBMITTED, SUBMITTED),
+        (ACCEPTED, ACCEPTED),
+        (IN_PRODUCTION, IN_PRODUCTION),
+        (SUSPENDED, SUSPENDED),
+        (CANCELLED, CANCELLED),
+        (COMPLETED, COMPLETED),
+        (FAILED, FAILED),
+        (TERMINATED, TERMINATED),
+        (DOWNLOADED, DOWNLOADED),
+    ]
 
-    order = models.ForeignKey("Order", null=True, related_name="batches")
-    created_on = models.DateTimeField(auto_now_add=True)
-    completed_on = models.DateTimeField(null=True, blank=True)
-    updated_on = models.DateTimeField(editable=False, blank=True, null=True)
-    status = models.CharField(max_length=50, choices=STATUS_CHOICES,
-                              default=OrderStatus.SUBMITTED.value,
-                              help_text="initial status")
-
-    def update_status(self):
-        """Update a batch's status
-
-        This method is called whenever an order item is saved.
-        """
-
-        done_items = 0
-        for item in self.order_items.all():
-            item_status = OrderStatus(item.status)
-            if item_status in (OrderStatus.COMPLETED, OrderStatus.DOWNLOADED):
-                done_items += 1
-            else:
-                new_status = item_status
-                break
-        else:
-            if done_items == self.order_items.count():
-                new_status = OrderStatus.COMPLETED
-            else:
-                new_status = OrderStatus.IN_PRODUCTION
-        now = dt.datetime.now(pytz.utc)
-        self.status = new_status.value
-        self.updated_on = now
-        if new_status in (OrderStatus.COMPLETED, OrderStatus.TERMINATED,
-                          OrderStatus.FAILED):
-            self.completed_on = now
-        elif new_status == OrderStatus.DOWNLOADED:
-            pass
-        else:
-            self.completed_on = None
-        self.save()
-
-    def save(self, *args, **kwargs):
-        """Reimplment save() method in order to update the batch's order."""
-        super(Batch, self).save(*args, **kwargs)
-        self.order.update_status()
-
-    def price(self):
-        total = Decimal(0)
-        return total
-
-    def create_order_item(self, status, additional_status_info,
-                          order_item_spec):
-        item = OrderItem(
-            batch=self,
-            status=status,
-            additional_status_info=additional_status_info,
-            remark=order_item_spec["order_item_remark"],
-            collection=order_item_spec["collection"],
-            identifier=order_item_spec.get("identifier", ""),
-            item_id=order_item_spec["item_id"]
-        )
-        item.save()
-        for name, value in order_item_spec["option"].items():
-            # assuming that the option has already been validated
-            selected_option = SelectedOption(option=name, value=value,
-                                             customizable_item=item)
-            selected_option.save()
-        for name, value in order_item_spec["scene_selection"].items():
-            item.selected_scene_selection_options.add(
-                SelectedSceneSelectionOption(option=name, value=value))
-        delivery = order_item_spec["delivery_options"]
-        if delivery is not None:
-            copies = 1 if delivery["copies"] is None else delivery["copies"]
-            sdo = SelectedDeliveryOption(
-                customizable_item=item,
-
-                delivery_type=None,
-                delivery_details=None,
-
-                annotation=delivery["annotation"],
-                copies=copies,
-                special_instructions=delivery["special_instructions"],
-                option=delivery["type"]
-            )
-            sdo.save()
-        if order_item_spec["payment"] is not None:
-            item.selected_payment_option = SelectedPaymentOption(
-                option=order_item_spec["payment"])
-        item.save()
-        return item
-
-    def create_oseo_items_status(self):
-        items_status = []
-        for i in self.order_items.all():
-            items_status.append(i.create_oseo_status_item_type())
-        return items_status
-
-    def get_completed_items(self, behaviour):
-        last_time = self.order.last_describe_result_access_request
-        order_delivery = self.order.selected_delivery_option.delivery_type
-        completed = []
-        if self.status != OrderStatus.COMPLETED.value:
-            # batch is either still being processed,
-            # failed or already downloaded, so we don't care for it
-            pass
-        else:
-            batch_complete_items = []
-            order_items = self.order_items.all()
-            for oi in order_items:
-                try:
-                    delivery = oi.selected_delivery_option.delivery_type
-                except SelectedDeliveryOption.DoesNotExist:
-                    delivery = order_delivery
-                if delivery != DeliveryOption.ONLINE_DATA_ACCESS.value:
-                    # getStatus only applies to items with onlinedataaccess
-                    continue
-                if oi.status == OrderStatus.COMPLETED.value:
-                    if (last_time is None or behaviour == self.ALL_READY) or \
-                            (behaviour == self.NEXT_READY and
-                                     oi.completed_on >= last_time):
-                        batch_complete_items.append(oi)
-            if self.order.packaging == Packaging.ZIP.value:
-                if len(batch_complete_items) == len(order_items):
-                    # the zip is ready, lets get only a single file
-                    # because they all point to the same URL
-                    completed.append(batch_complete_items[0])
-                else:  # the zip is not ready yet
-                    pass
-            else:  # lets get each file that is complete
-                completed = batch_complete_items
-        return completed
+    status = models.CharField(
+        max_length=50,
+        choices=STATUS_CHOICES,
+        default=SUBMITTED,
+        help_text="initial status"
+    )
+    additional_status_info = models.TextField(
+        help_text="Additional information about the status",
+        blank=True
+    )
+    mission_specific_status_info = models.TextField(
+        help_text="Additional information about the status that is specific "
+                  "to the mission",
+        blank=True
+    )
+    created_on = models.DateTimeField(
+        auto_now_add=True
+    )
+    completed_on = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+    status_changed_on = models.DateTimeField(
+        editable=False,
+        blank=True,
+        null=True
+    )
+    remark = models.TextField(
+        help_text="Some specific remark about the item",
+        blank=True
+    )
 
     class Meta:
-        verbose_name_plural = "batches"
+        abstract = True
 
-    def __unicode__(self):
-        return str("{}({})".format(self.__class__.__name__, self.id))
-
-
-class CustomizableItem(models.Model):
-    status = models.CharField(max_length=50, choices=STATUS_CHOICES,
-                              default=OrderStatus.SUBMITTED.value,
-                              help_text="initial status")
-    additional_status_info = models.TextField(help_text="Additional "
-                                              "information about the status",
-                                              blank=True)
-    mission_specific_status_info = models.TextField(help_text="Additional "
-                                                    "information about the "
-                                                    "status that is specific "
-                                                    "to the mission",
-                                                    blank=True)
-    created_on = models.DateTimeField(auto_now_add=True)
-    completed_on = models.DateTimeField(null=True, blank=True)
-    status_changed_on = models.DateTimeField(editable=False, blank=True,
-                                             null=True)
-    remark = models.TextField(help_text="Some specific remark about the item",
-                              blank=True)
-
-    def __unicode__(self):
-        try:
-            instance = Order.objects.get(id=self.id)
-        except ObjectDoesNotExist:
-            instance = OrderItem.objects.get(id=self.id)
-        return instance.__unicode__()
+    #def __str__(self):
+    #    try:
+    #        instance = Order.objects.get(id=self.id)
+    #    except ObjectDoesNotExist:
+    #        instance = OrderItem.objects.get(id=self.id)
+    #    return instance.__str__()
 
     def create_oseo_delivery_options(self):
         """Create an OSEO DeliveryOptionsType"""
@@ -263,12 +145,12 @@ class CustomizableItem(models.Model):
             dot = None
         else:
             dot = oseo.DeliveryOptionsType()
-            if do.delivery_type == DeliveryOption.ONLINE_DATA_ACCESS.value:
+            if do.delivery_type == SelectedDeliveryOption.ONLINE_DATA_ACCESS:
                 dot.onlineDataAccess = BIND(protocol=do.delivery_details)
-            elif do.delivery_type == DeliveryOption.ONLINE_DATA_DELIVERY.value:
+            elif do.delivery_type == SelectedDeliveryOption.ONLINE_DATA_DELIVERY:
                 dot.onlineDataDelivery = BIND(
                     protocol=do.delivery_details)
-            elif do.delivery_type == DeliveryOption.MEDIA_DELIVERY.value:
+            elif do.delivery_type == SelectedDeliveryOption.MEDIA_DELIVERY:
                 medium, _, shipping = do.delivery_details.partition(",")
                 dot.mediaDelivery = BIND(
                     packageMedium=medium,
@@ -283,18 +165,19 @@ class CustomizableItem(models.Model):
         return dot
 
 
+@python_2_unicode_compatible
 class Extension(models.Model):
 
-    item = models.ForeignKey(CustomizableItem)
     text = models.CharField(
         max_length=255, blank=True,
         help_text="Custom extensions to the OSEO standard"
     )
 
-    def __unicode__(self):
+    def __str__(self):
         return self.text
 
 
+@python_2_unicode_compatible
 class DeliveryInformation(AbstractDeliveryAddress):
     order = models.OneToOneField("Order", related_name="delivery_information")
 
@@ -331,6 +214,7 @@ class DeliveryInformation(AbstractDeliveryAddress):
         return del_info
 
 
+@python_2_unicode_compatible
 class InvoiceAddress(AbstractDeliveryAddress):
     order = models.OneToOneField("Order", null=True,
                                  related_name="invoice_address")
@@ -339,6 +223,7 @@ class InvoiceAddress(AbstractDeliveryAddress):
         verbose_name_plural = "invoice addresses"
 
 
+@python_2_unicode_compatible
 class OnlineAddress(models.Model):
     FTP = 'ftp'
     SFTP = 'sftp'
@@ -360,15 +245,57 @@ class OnlineAddress(models.Model):
         verbose_name_plural = 'online addresses'
 
 
+@python_2_unicode_compatible
 class Order(CustomizableItem):
-    PACKAGING_CHOICES = [(v.value, v.value) for v in Packaging]
-    ORDER_TYPE_CHOICES = [(t.value, t.value) for t in OrderType]
+    MASSIVE_ORDER_REFERENCE = "Massive order"
+    PRODUCT_ORDER = "PRODUCT_ORDER"
+    SUBSCRIPTION_ORDER = "SUBSCRIPTION_ORDER"
+    MASSIVE_ORDER = "MASSIVE_ORDER"
+    TASKING_ORDER = "TASKING_ORDER"
+    ORDER_TYPE_CHOICES = [
+        (PRODUCT_ORDER, PRODUCT_ORDER),
+        (SUBSCRIPTION_ORDER, SUBSCRIPTION_ORDER),
+        (MASSIVE_ORDER, MASSIVE_ORDER),
+        (TASKING_ORDER, TASKING_ORDER),
+    ]
+    ZIP = "zip"
+    PACKAGING_CHOICES = [
+        (ZIP, ZIP),
+    ]
+    NONE = "None"
+    FINAL = "Final"
+    ALL = "All"
+    STATUS_NOTIFICATION_CHOICES = [
+        (NONE, NONE),
+        (FINAL, FINAL),
+        (ALL, ALL),
+    ]
+    STANDARD = "STANDARD"
+    FAST_TRACK = "FAST_TRACK"
+    PRIORITY_CHOICES = [
+        (STANDARD, STANDARD),
+        (FAST_TRACK, FAST_TRACK),
+    ]
 
+    extensions = models.ForeignKey(
+        "Extension",
+        related_name="order",
+    )
+    selected_options = models.ForeignKey(
+        'SelectedOption',
+        related_name='order'
+    )
+    selected_delivery_option = models.OneToOneField(
+        'SelectedDeliveryOption',
+        related_name='order',
+        blank=True,
+        null=True
+    )
     user = models.ForeignKey(django_settings.AUTH_USER_MODEL,
-                             related_name="orders")
+                             related_name="%(app_label)s_%(class)s_orders")
     order_type = models.CharField(
         max_length=30,
-        default=OrderType.PRODUCT_ORDER.value,
+        default=PRODUCT_ORDER,
         choices=ORDER_TYPE_CHOICES
     )
 
@@ -383,35 +310,36 @@ class Order(CustomizableItem):
                                  blank=True)
     priority = models.CharField(
         max_length=30,
-        choices=[(p.value, p.value) for p in Priority],
-        blank=True
+        choices=PRIORITY_CHOICES,
+        default=STANDARD,
+        blank=True,
     )
     status_notification = models.CharField(
         max_length=10,
-        default=StatusNotification.NONE.value,
-        choices=[(n.value, n.value) for n in StatusNotification]
+        default=NONE,
+        choices=STATUS_NOTIFICATION_CHOICES
     )
 
     def show_batches(self):
         return ', '.join([str(b.id) for b in self.batches.all()])
     show_batches.short_description = 'available batches'
 
-    def create_batch(self, item_status, additional_status_info,
-                     *order_items_spec):
-        batch = Batch(order=self, status=self.status)
-        batch.save()
-        for item_spec in order_items_spec:
-            batch.create_order_item(item_status, additional_status_info,
-                                    item_spec)
-        self.batches.add(batch)
-        return batch
+    #def create_batch(self, item_status, additional_status_info,
+    #                 *order_items_spec):
+    #    batch = Batch(order=self, status=self.status)
+    #    batch.save()
+    #    for item_spec in order_items_spec:
+    #        batch.create_order_item(item_status, additional_status_info,
+    #                                item_spec)
+    #    self.batches.add(batch)
+    #    return batch
 
     def create_oseo_order_monitor(
-            self, presentation=Presentation.BRIEF.value):
+            self, presentation="brief"):
         om = oseo.CommonOrderMonitorSpecification()
-        if self.order_type == OrderType.MASSIVE_ORDER.value:
-            om.orderType = OrderType.PRODUCT_ORDER.value
-            om.orderReference = MASSIVE_ORDER_REFERENCE
+        if self.order_type == self.MASSIVE_ORDER:
+            om.orderType = self.PRODUCT_ORDER
+            om.orderReference = self.MASSIVE_ORDER_REFERENCE
         else:
             om.orderType = self.order_type
             om.orderReference = _n(self.reference)
@@ -437,12 +365,12 @@ class Order(CustomizableItem):
         # add any 'option' elements
         om.deliveryOptions = self.create_oseo_delivery_options()
         om.priority = _n(self.priority)
-        if presentation == Presentation.FULL.value:
-            if self.order_type == OrderType.PRODUCT_ORDER.value:
+        if presentation == "full":
+            if self.order_type == self.PRODUCT_ORDER:
                 batch = self.batches.get()
                 sits = batch.create_oseo_items_status()
                 om.orderItem.extend(sits)
-            elif self.order_type == OrderType.SUBSCRIPTION_ORDER.value:
+            elif self.order_type == self.SUBSCRIPTION_ORDER:
                 for batch in self.batches.all()[1:]:
                     sits = batch.create_oseo_items_status()
                     om.orderItem.extend(sits)
@@ -453,121 +381,46 @@ class Order(CustomizableItem):
     def update_status(self):
         try:
             self.productorder.update_status()
-        except ProductOrder.DoesNotExist:
+        except self.DoesNotExist:
             self.derivedorder.update_sattus()
 
-    def __unicode__(self):
+    def __str__(self):
         return '{}'.format(self.id)
 
 
-class OrderPendingModerationManager(models.Manager):
-
-    def get_queryset(self):
-        return super(OrderPendingModerationManager,
-                     self).get_queryset().filter(
-            status=OrderStatus.SUBMITTED.value)
-
-
+@python_2_unicode_compatible
 class OrderPendingModeration(Order):
-    objects = OrderPendingModerationManager()
+    objects = managers.OrderPendingModerationManager()
 
     class Meta:
         proxy = True
         verbose_name_plural = "orders pending moderation"
 
 
-class ProductOrder(Order):
-
-    def update_status(self):
-        # product orders have only one batch
-        batch = self.batches.get()
-        self.status = batch.status
-        additional_info = ""
-        for item in batch.order_items.all():
-            additional_info += ("Item {0.item_id} - "
-                                "{0.additional_status_info} \n\n".format(item))
-        self.additional_status_info = additional_info
-        self.save()
-
-    def __unicode__(self):
-        return "{}({})".format(self.__class__.__name__, self.id)
-
-
-# TODO - Remove this model
-class DerivedOrder(Order):
-
-    def update_status(self):
-        try:
-            self.massiveorder.update_status()
-        except MassiveOrder.DoesNotExist:
-            try:
-                self.subscriptionorder.update_status()
-            except SubscriptionOrder.DoesNotExist:
-                self.taskingorder.update_status()
-
-
-class MassiveOrder(DerivedOrder):
-
-    def __unicode__(self):
-        return "{}({})".format(self.__class__.__name__, self.id)
-
-
-class SubscriptionOrder(DerivedOrder):
-    begin_on = models.DateTimeField(help_text="Date and time for when the "
-                                              "subscription should become "
-                                              "active.")
-    end_on = models.DateTimeField(help_text="Date and time for when the "
-                                            "subscription should terminate.")
-
-    def create_batch(self, item_status, additional_status_info,
-                     *order_item_spec, **kwargs):
-        """
-        Create a batch for a subscription order.
-
-        Subscription orders are different from normal product orders because
-        the user is not supposed to be able to ask for the same collection
-        twice.
-
-        :param item_status:
-        :param additional_status_info:
-        :param order_item_spec:
-        :return:
-        """
-
-        batch = Batch()
-        batch.save()
-        for oi in order_item_spec:
-            collection = oi["collection"]
-            previous_collections = [oi.collection for oi in
-                                    batch.order_items.all()]
-            if collection not in previous_collections:
-                batch.create_order_item(item_status, additional_status_info,
-                                        oi)
-            else:
-                raise errors.ServerError("Repeated collection: "
-                                         "{}".format(collection))
-        self.batches.add(batch)
-        return batch
-
-    def update_status(self):
-        #most_recent = [b for b in self.batches.order_by("-completed_on")][0]
-        raise NotImplementedError
-
-    def __unicode__(self):
-        return "{}({})".format(self.__class__.__name__, self.id)
-
-
-class TaskingOrder(DerivedOrder):
-
-    def __unicode__(self):
-        return "{}({})".format(self.__class__.__name__, self.id)
-
-
+@python_2_unicode_compatible
 class OrderItem(CustomizableItem):
-    batch = models.ForeignKey("Batch", related_name="order_items")
+    extension = models.ForeignKey(
+        "Extension",
+        related_name="order_item",
+        null=True,
+        blank=True
+    )
+    selected_options = models.ForeignKey(
+        'SelectedOption',
+        related_name='order_item',
+        null=True,
+        blank=True
+    )
+    selected_delivery_option = models.OneToOneField(
+        'SelectedDeliveryOption',
+        related_name='order_item',
+        blank=True,
+        null=True
+    )
     collection = models.CharField(
         max_length=255,
-        choices=COLLECTION_CHOICES
+        choices=[
+            (col["name"], col["name"]) for col in settings.get_collections()]
     )
     identifier = models.CharField(
         max_length=255,
@@ -584,13 +437,49 @@ class OrderItem(CustomizableItem):
         help_text="URL where this item is available",
         blank=True
     )
-    expires_on = models.DateTimeField(null=True, blank=True)
-    last_downloaded_at = models.DateTimeField(null=True, blank=True)
+    product_order_batch = models.ForeignKey(
+        "ProductOrderBatch",
+        null=True,
+        blank=True,
+        related_name="order_items",
+    )
+    subscription_specification_batch = models.ForeignKey(
+        "SubscriptionSpecificationBatch",
+        null=True,
+        blank=True,
+        related_name="order_items",
+    )
+    subscription_processing_batch = models.ForeignKey(
+        "SubscriptionProcessingBatch",
+        null=True,
+        blank=True,
+        related_name="order_items",
+    )
+    expires_on = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+    last_downloaded_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
     available = models.BooleanField(default=False)
     downloads = models.SmallIntegerField(
         default=0,
         help_text="Number of times this order item has been downloaded."
     )
+
+    def save(self, *args, **kwargs):
+        """Save instance into the database.
+
+        This method reimplements django's default model.save() behaviour in
+        order to update the item's batch's status (if there is a batch).
+        """
+
+        super(OrderItem, self).save(*args, **kwargs)
+        batch = self.get_batch()
+        if batch:
+            self.batch.update_status()
 
     def export_options(self):
         valid_options = dict()
@@ -611,17 +500,17 @@ class OrderItem(CustomizableItem):
             "delivery_type": delivery.delivery_type,
             #"delivery_fee": delivery.option.delivery_fee,
         }
-        if delivery.delivery_type == DeliveryOption.ONLINE_DATA_ACCESS.value:
+        if delivery.delivery_type == SelectedDeliveryOption.ONLINE_DATA_ACCESS:
             protocol = delivery.delivery_details
             allowed_options = settings.get_online_data_access_options()
             fee = [opt.get("fee", 0) for opt in allowed_options if opt["protocol"] == protocol][0]
             valid_delivery["protocol"] = protocol
 
-        elif delivery.delivery_type == DeliveryOption.ONLINE_DATA_DELIVERY.value:
+        elif delivery.delivery_type == SelectedDeliveryOption.ONLINE_DATA_DELIVERY:
             pass
 
 
-        elif delivery.delivery_type == DeliveryOption.MEDIA_DELIVERY.value:
+        elif delivery.delivery_type == SelectedDeliveryOption.MEDIA_DELIVERY:
             valid_delivery["medium"] = delivery.delivery_details
         return valid_delivery
 
@@ -652,6 +541,12 @@ class OrderItem(CustomizableItem):
             _n(self.mission_specific_status_info)
         return sit
 
+    def get_batch(self):
+        return (self.product_order_batch or
+                self.subscription_specification_batch or
+                self.subscription_processing_batch)
+
+
     def process(self):
         """Process the item
 
@@ -660,7 +555,7 @@ class OrderItem(CustomizableItem):
 
         """
 
-        self.status = OrderStatus.IN_PRODUCTION.value
+        self.status = self.IN_PRODUCTION
         self.additional_status_info = "Item is being processed"
         self.save()
         order = self.batch.order
@@ -685,12 +580,12 @@ class OrderItem(CustomizableItem):
                 "Could not process order item {!r}. The error "
                 "was: {}".format(self, formatted_tb)
             )
-            self.status = OrderStatus.FAILED.value
+            self.status = self.FAILED
             self.additional_status_info = error_message
             #raise errors.OseoServerError(error_message)
             raise
         else:
-            self.status = OrderStatus.COMPLETED.value
+            self.status = self.COMPLETED
             self.additional_status_info = "Item processed"
             now = dt.datetime.now(pytz.utc)
             self.url = url
@@ -712,76 +607,54 @@ class OrderItem(CustomizableItem):
                 result = True
         return result
 
-    def save(self, *args, **kwargs):
-        """Reimplementation of model.save() to update status on batch"""
-        super(OrderItem, self).save(*args, **kwargs)
-        self.batch.update_status()
-
     def _create_expiry_date(self):
         now = dt.datetime.now(pytz.utc)
-        order_type = OrderType(self.batch.order.order_type)
-        generic_order_config = utilities.get_generic_order_config(order_type)
+        batch = self.get_batch()
+        generic_order_config = utilities.get_generic_order_config(
+            batch.order.order_type)
         expiry_date = now + dt.timedelta(
             days=generic_order_config.get("item_availability_days",1))
         return expiry_date
 
-    def __unicode__(self):
-        return ("id={0.id!r}, batch={1.id!r}, "
-                "order={2.id!r}, item_id={0.item_id!r}".format(
-            self, self.batch, self.batch.order)
-        )
+    #def __str__(self):
+    #    batch = (self.product_order_batch or
+    #             self.subscription_specification_batch or
+    #             self.subscription_processing_batch)
+    #    try:
+    #        order = batch.order
+    #    except AttributeError:
+    #        order = None
+    #    return (
+    #        "{instance.__class__.__name__}(id={instance.id!r}, "
+    #        "batch={batch.id!r}, order={order.id!r}, "
+    #        "item_id={instancee.item_id!r}".format(
+    #        instance=self, batch=batch, order=order)
+    #    )
 
 
-
-#class OseoFile(models.Model):
-#    order_item = models.ForeignKey("OrderItem", related_name="files")
-#    created_on = models.DateTimeField(auto_now_add=True)
-#    url = models.CharField(max_length=255, help_text="URL where this file "
-#                                                     "is available")
-#    expires_on = models.DateTimeField(null=True, blank=True)
-#    last_downloaded_at = models.DateTimeField(null=True, blank=True)
-#    available = models.BooleanField(default=False)
-#    downloads = models.SmallIntegerField(default=0,
-#                                         help_text="Number of times this "
-#                                                   "order item has been "
-#                                                   "downloaded.")
-#
-#    def can_be_deleted(self):
-#        result = False
-#        now = dt.datetime.now(pytz.utc)
-#        if self.expires_on < now:
-#            result = True
-#        else:
-#            user = self.order_item.batch.order.user
-#            if self.downloads > 0 and user.delete_downloaded_files:
-#                result = True
-#        return result
-#
-#    def __unicode__(self):
-#        return self.url
-
-
+@python_2_unicode_compatible
 class SelectedOption(models.Model):
-    customizable_item = models.ForeignKey('CustomizableItem',
-                                          related_name='selected_options')
+    objects = managers.SelectedOptionManager()
     option = models.CharField(max_length=255)
     value = models.CharField(max_length=255, help_text='Value for this option')
 
-    def __unicode__(self):
+    def __str__(self):
         return self.value
 
 
+@python_2_unicode_compatible
 class SelectedPaymentOption(models.Model):
-    order_item = models.OneToOneField('OrderItem',
-                                      related_name='selected_payment_option',
-                                      null=True,
-                                      blank=True)
+    order_item = models.ForeignKey(
+        'OrderItem',
+        related_name='selected_payment_option',
+    )
     option = models.CharField(max_length=255)
 
-    def __unicode__(self):
+    def __str__(self):
         return self.option.name
 
 
+@python_2_unicode_compatible
 class SelectedSceneSelectionOption(models.Model):
     order_item = models.ForeignKey(
         'OrderItem',
@@ -791,23 +664,21 @@ class SelectedSceneSelectionOption(models.Model):
     value = models.CharField(max_length=255,
                              help_text='Value for this option')
 
-    def __unicode__(self):
+    def __str__(self):
         return self.value
 
 
 class SelectedDeliveryOption(models.Model):
-    DELIVERY_CHOICES = [(v.value, v.value) for v in DeliveryOption]
+    MEDIA_DELIVERY = "mediadelivery"
+    ONLINE_DATA_ACCESS = "onlinedataaccess"
+    ONLINE_DATA_DELIVERY = "onlinedatadelivery"
+    DELIVERY_CHOICES = [
+        (i, i) for i in locals().keys() if not i.startswith("__")]
 
-    customizable_item = models.OneToOneField(
-        'CustomizableItem',
-        related_name='selected_delivery_option',
-        blank=True,
-        null=True
-    )
     delivery_type = models.CharField(
         max_length=30,
         choices=DELIVERY_CHOICES,
-        default=DeliveryOption.ONLINE_DATA_ACCESS.value,
+        default=ONLINE_DATA_ACCESS,
         help_text="Type of delivery that has been specified"
     )
     delivery_details = models.CharField(
@@ -823,19 +694,194 @@ class SelectedDeliveryOption(models.Model):
     annotation = models.TextField(blank=True)
     special_instructions = models.TextField(blank=True)
 
-    def __unicode__(self):
+    def __str__(self):
         return "{0.delivery_type}, {0.delivery_details}".format(self)
 
 
-class SubscriptionBatch(Batch):
+@python_2_unicode_compatible
+class Batch(models.Model):
+    # subFunction values for DescribeResultAccess operation
+    ALL_READY = "allReady"
+    NEXT_READY = "nextReady"
+
+    order = models.ForeignKey(
+        "Order",
+        null=True,
+        related_name="%(app_label)s_%(class)s_batches"
+    )
+    created_on = models.DateTimeField(auto_now_add=True)
+    completed_on = models.DateTimeField(null=True, blank=True)
+    updated_on = models.DateTimeField(editable=False, blank=True, null=True)
+    status = models.CharField(
+        max_length=50,
+        choices=CustomizableItem.STATUS_CHOICES,
+        default=CustomizableItem.SUBMITTED,
+        help_text="initial status"
+    )
+
+    class Meta:
+        abstract = True
+        verbose_name_plural = "batches"
+
+    def __str__(self):
+        return str("{}({})".format(self.__class__.__name__, self.id))
+
+    def update_status(self):
+        """Update a batch's status
+
+        This method is called whenever an order item is saved.
+        """
+
+        done_items = 0
+        for item in self.order_items.all():
+            if item.status in (CustomizableItem.COMPLETED,
+                               CustomizableItem.DOWNLOADED):
+                done_items += 1
+            else:
+                new_status = item.status
+                break
+        else:
+            if done_items == self.order_items.count():
+                new_status = Order.COMPLETED
+            else:
+                new_status = Order.IN_PRODUCTION
+        now = dt.datetime.now(pytz.utc)
+        self.status = new_status.value
+        self.updated_on = now
+        if new_status in (CustomizableItem.COMPLETED,
+                          CustomizableItem.TERMINATED,
+                          CustomizableItem.FAILED):
+            self.completed_on = now
+        elif new_status == Order.DOWNLOADED:
+            pass
+        else:
+            self.completed_on = None
+        self.save()
+
+    #def save(self, *args, **kwargs):
+    #    """Reimplment save() method in order to update the batch's order."""
+    #    super(Batch, self).save(*args, **kwargs)
+    #    self.order.update_status()
+
+    def price(self):
+        total = Decimal(0)
+        return total
+
+    #def create_order_item(self, status, additional_status_info,
+    #                      order_item_spec):
+    #    item = OrderItem(
+    #        batch=self,
+    #        status=status,
+    #        additional_status_info=additional_status_info,
+    #        remark=order_item_spec["order_item_remark"],
+    #        collection=order_item_spec["collection"],
+    #        identifier=order_item_spec.get("identifier", ""),
+    #        item_id=order_item_spec["item_id"]
+    #    )
+    #    item.save()
+    #    for name, value in order_item_spec["option"].items():
+    #        # assuming that the option has already been validated
+    #        selected_option = SelectedOption(option=name, value=value,
+    #                                         customizable_item=item)
+    #        selected_option.save()
+    #    for name, value in order_item_spec["scene_selection"].items():
+    #        item.selected_scene_selection_options.add(
+    #            SelectedSceneSelectionOption(option=name, value=value))
+    #    delivery = order_item_spec["delivery_options"]
+    #    if delivery is not None:
+    #        copies = 1 if delivery["copies"] is None else delivery["copies"]
+    #        sdo = SelectedDeliveryOption(
+    #            customizable_item=item,
+
+    #            delivery_type=None,
+    #            delivery_details=None,
+
+    #            annotation=delivery["annotation"],
+    #            copies=copies,
+    #            special_instructions=delivery["special_instructions"],
+    #            option=delivery["type"]
+    #        )
+    #        sdo.save()
+    #    if order_item_spec["payment"] is not None:
+    #        item.selected_payment_option = SelectedPaymentOption(
+    #            option=order_item_spec["payment"])
+    #    item.save()
+    #    return item
+
+    def create_oseo_items_status(self):
+        items_status = []
+        for i in self.order_items.all():
+            items_status.append(i.create_oseo_status_item_type())
+        return items_status
+
+    def get_completed_items(self, behaviour):
+        last_time = self.order.last_describe_result_access_request
+        order_delivery = self.order.selected_delivery_option.delivery_type
+        completed = []
+        if self.status != CustomizableItem.COMPLETED:
+            # batch is either still being processed,
+            # failed or already downloaded, so we don't care for it
+            pass
+        else:
+            batch_complete_items = []
+            order_items = self.order_items.all()
+            for oi in order_items:
+                try:
+                    delivery = oi.selected_delivery_option.delivery_type
+                except SelectedDeliveryOption.DoesNotExist:
+                    delivery = order_delivery
+                if delivery != SelectedDeliveryOption.ONLINE_DATA_ACCESS:
+                    # getStatus only applies to items with onlinedataaccess
+                    continue
+                if oi.status == CustomizableItem.COMPLETED:
+                    if (last_time is None or behaviour == self.ALL_READY) or \
+                            (behaviour == self.NEXT_READY and
+                                     oi.completed_on >= last_time):
+                        batch_complete_items.append(oi)
+            if self.order.packaging == Order.ZIP:
+                if len(batch_complete_items) == len(order_items):
+                    # the zip is ready, lets get only a single file
+                    # because they all point to the same URL
+                    completed.append(batch_complete_items[0])
+                else:  # the zip is not ready yet
+                    pass
+            else:  # lets get each file that is complete
+                completed = batch_complete_items
+        return completed
+
+
+
+@python_2_unicode_compatible
+class ProductOrderBatch(Batch):
+    pass
+
+
+@python_2_unicode_compatible
+class SubscriptionSpecificationBatch(Batch):
+    pass
+
+
+@python_2_unicode_compatible
+class SubscriptionProcessingBatch(Batch):
     timeslot = models.DateTimeField()
     collection = models.CharField(
         max_length=255,
-        choices=COLLECTION_CHOICES
+        choices=[
+            (col["name"], col["name"]) for col in settings.get_collections()]
     )
 
     class Meta:
         verbose_name_plural = "subscription batches"
 
-    def __unicode__(self):
+    def __str__(self):
         return str("{}({})".format(self.__class__.__name__, self.id))
+
+    def save(self, *args, **kwargs):
+        order_specification_batch = self.order.batches.first()
+        item_specification = order_specification_batch.order_items.get(
+            collection=self.collection)
+        requested_options = item_specification.export_options()
+        item_processor = utilities.get_item_processor(item_specification)
+        identifiers = item_processor.get_subscription_batch_identifiers(
+            self.timeslot, self.collection)
+

@@ -25,7 +25,7 @@
     <p>Where <em>[username]</em> and <em>[password]</em> correspond to your
         user credentials at the Copernicus Global Land access portal.</p>
     <p>Please note that <em>each file will be accessible for a
-        minimum of {{ order.order_type.item_availability_days }} days</em>.
+        minimum of {{ item_availability_days }} days</em>.
         After a file expires it may be deleted according to the server's
         maintenance needs.
     </p>
@@ -41,7 +41,7 @@
 
 {% else %}
     <p>Additional details:</p>
-    <p>{{ details }}</p>
+    <p>{{ order.additional_status_info }}</p>
 
 {% endif %}
 

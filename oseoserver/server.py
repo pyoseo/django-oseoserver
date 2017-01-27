@@ -55,10 +55,14 @@ import pyxb
 
 from . import tasks
 from . import models
+from .models import Order
+from .models import CustomizableItem
 from . import errors
 from . import utilities
-from . import constants
-from .signals import signals
+from .constants import ENCODING
+from .mailsender import send_moderation_email
+from .mailsender import send_product_order_moderated_email
+from .mailsender import send_subscription_moderated_email
 
 logger = logging.getLogger(__name__)
 
@@ -116,16 +120,18 @@ class OseoServer(object):
         result = operation(schema_instance, user)
         if op_name == "Submit":
             response, order = result
-            if order.status == constants.OrderStatus.SUBMITTED:
-                utilities.send_moderation_email(order)
-            else:
-                order_type = constants.OrderType(order.order_type)
-                if order_type == constants.OrderType.PRODUCT_ORDER:
-                    self.dispatch_product_order(order)
+            if order.status == CustomizableItem.SUBMITTED:
+                send_moderation_email(order.order_type, order.id)
+            elif order.status == CustomizableItem.ACCEPTED:
+                if order.order_type == Order.PRODUCT_ORDER:
+                    order.dispatch()
+            else:  # if order is not accepted or submitted we probably
+                   # should raise an error
+                pass
         else:
             response = result
         response_element = etree.fromstring(response.toxml(
-            encoding=constants.ENCODING))
+            encoding=ENCODING))
         return response_element
 
     def create_exception_report(self, code, text, locator=None):
@@ -156,7 +162,7 @@ class OseoServer(object):
             version=self.OSEO_VERSION)
         exception_report.append(exception)
         result = etree.fromstring(
-            exception_report.toxml(encoding=constants.ENCODING))
+            exception_report.toxml(encoding=ENCODING))
         return result
 
     def parse_xml(self, xml):
@@ -174,33 +180,13 @@ class OseoServer(object):
         """
 
         try:
-            document = etree.tostring(xml, encoding=constants.ENCODING)
+            document = etree.tostring(xml, encoding=ENCODING)
             oseo_request = oseo.CreateFromDocument(document)
         except (pyxb.UnrecognizedDOMRootNodeError,
                 pyxb.UnrecognizedContentError,
                 pyxb.SimpleFacetValueError):
             raise errors.NoApplicableCodeError()
         return oseo_request
-
-    def dispatch_product_order(self, order, force=False):
-        """Dispatch a product order for processing in the async queue.
-
-        Parameters
-        ----------
-
-        order: oseoserver.models.Order
-            The order to be dispatched
-        force: bool
-            Should the order be dispatched regardless of its status?
-        :type force: bool
-        """
-
-        status = (constants.OrderStatus.ACCEPTED if force
-                  else constants.OrderStatus(order.status))
-        if status == constants.OrderStatus.ACCEPTED:
-            logger.debug("Sending order {0.id} to processing queue...".format(
-                order))
-            tasks.process_product_order.apply_async((order.id,))
 
     # the code that checks the value of the email notification extension
     # does not belong in oseoserver. This could be simplified by
@@ -288,12 +274,12 @@ class OseoServer(object):
     def process_product_orders(self):
         for order in models.ProductOrder.objects.filter(
                 status=models.CustomizableItem.ACCEPTED):
-            self.dispatch_product_order(order)
+            order.dispatch()
 
     def reprocess_order(self, order_id, **kwargs):
         order = models.Order.objects.get(id=order_id)
         if order.order_type.name == models.Order.PRODUCT_ORDER:
-            self.dispatch_product_order(order, force=True)
+            order.dispatch(force=True)
         elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
             self.dispatch_subscription_order(order, kwargs["timeslot"],
                                              kwargs["collection"])
@@ -302,39 +288,56 @@ class OseoServer(object):
                 order.order_type.name))
 
     def moderate_order(self, order, approved, rejection_details=None):
-        """
-        Decide on approval of an order.
+        """Act upon order moderation by the admin.
 
         The OSEO standard does not really define any moderation workflow
         for orders. As such, none of the defined statuses fits exactly with
         this process. We are abusing the CANCELLED status for this.
 
-        :param order:
-        :param approved:
-        :return:
+        Parameters
+        ----------
+        order: oseoserver.models.Order
+            The order that has been moderated
+        approved: bool
+            The moderation result
+        rejection_details: str, optional
+            Any additional details explaining why the order has been rejected
+
         """
 
-        rejection_details = rejection_details or ("Order request has been "
-                                                  "rejected by the "
-                                                  "administrators")
-        if order.order_type == constants.OrderType.PRODUCT_ORDER.value:
-            self._moderate_request(
-                order,
-                approved,
-                acceptance_details="Order has been approved and is waiting "
-                                   "in the processing queue",
-                rejection_details=rejection_details
-            )
-            self.dispatch_product_order(order)
-        elif order.order_type == constants.OrderType.SUBSCRIPTION_ORDER.value:
-            self._moderate_request(
-                order,
-                approved,
-                acceptance_details="Subscription has been approved and will "
-                                   "be processed when new products become "
-                                   "available",
-                rejection_details=rejection_details
-            )
+        if approved:
+            order.status = CustomizableItem.ACCEPTED
+            if order.order_type == Order.PRODUCT_ORDER:
+                order.additional_status_info = (
+                    "Order has been approved and is waiting in the "
+                    "processing queue for an available slot"
+                )
+                order.save()
+                order.productorder.dispatch()
+            elif order.order_type == Order.SUBSCRIPTION_ORDER:
+                order.additional_status_info = (
+                    "Subscription has been approved and will be processed "
+                    "whenever new products become available"
+                )
+            else:
+                raise NotImplementedError
+        else:
+            order.status = CustomizableItem.CANCELLED
+            order.additional_status_info = rejection_details or (
+                "Order request has been rejected by the administrators")
+        order.save()
+        self._send_order_moderation_email(approved, order)
+
+    def _send_order_moderation_email(self, approved, order):
+        mail_recipients = get_user_model().objects.filter(
+            Q(orders__id=order.id) | Q(is_staff=True)
+        ).exclude(email="").distinct("email")
+        mail_sender = {
+            Order.PRODUCT_ORDER: send_product_order_moderated_email,
+            Order.SUBSCRIPTION_ORDER: send_subscription_moderated_email,
+        }.get(order.order_type)
+        if mail_sender is not None:
+            mail_sender(order, approved, mail_recipients)
 
     def _clone_subscription_batch(self, order_item_identifiers,
                                   subscription_spec_batch, timeslot,
@@ -402,24 +405,3 @@ class OseoServer(object):
         op = self.OPERATION_CLASSES[oseo_op]
         return utilities.import_class(op), oseo_op
 
-    def _moderate_request(self, order, approved, acceptance_details="",
-                          rejection_details=""):
-        if approved:
-            order.status = constants.OrderStatus.ACCEPTED.value
-            order.additional_status_info = acceptance_details
-        else:
-            order.status = constants.OrderStatus.CANCELLED.value
-            order.additional_status_info = rejection_details
-
-        mail_recipients = get_user_model().objects.filter(
-            Q(orders__id=order.id) | Q(is_staff=True)
-        ).exclude(email="")
-
-        if order.order_type == constants.OrderType.SUBSCRIPTION_ORDER.value:
-            utilities.send_subscription_moderated_email(
-                order, approved, mail_recipients,
-                acceptance_details, rejection_details
-            )
-        else:
-            pass
-        order.save()

@@ -1,0 +1,31 @@
+<h1>Copernicus Global Land Service</h1>
+<h3>Product order <em>{{ order.reference }}</em> has been {{ order.status|lower }}</h3>
+
+{% if approved %}
+    <p>The ordered products have been placed in a queue and will be
+        processed when a vacant slot is available.</p>
+    <p>Processing status can be monitored by visiting Copernicus
+        Global Land's access portal at
+        <a href="http://land.copernicus.eu/global/access">http://land.copernicus.eu/global/access</a></p>
+    <p>The products will become available for download at your space
+        at IPMA's FTP server. Please visit:</p>
+    <p>ftp://[username]:[password]@geoland2.ipma.pt</p>
+    <p>Where <em>[username]</em> and <em>[password]</em> correspond to your
+        user credentials at the Copernicus Global Land access portal.</p>
+    <p>Please note that <em>each file will be accessible for a
+        minimum of {{ item_availability_days }} days</em>.
+        After a file expires it may be deleted according to the server's
+        maintenance needs.
+    </p>
+
+{% else %}
+    <p>Additional details:</p>
+    <p>{{ order.additional_status_info }}</p>
+
+{% endif %}
+
+<p>If you have further inquiries regarding IPMA's Copernicus Global Land
+    service please contact the helpdesk at
+    <a href="mailto:helpdesk.copernicus@ipma.pt">helpdesk.copernicus@ipma.pt</a>
+</p>
+

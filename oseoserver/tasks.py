@@ -41,13 +41,13 @@ from datetime import datetime, timedelta
 from celery import shared_task
 from celery import group, chain
 from celery.utils.log import get_task_logger
+from django.contrib.sites.models import Site
 import pytz
 
 from . import models
 from . import utilities
-from . import settings
-from .constants import OrderStatus
-from .constants import DeliveryOption
+from .models import CustomizableItem
+from .models import SelectedDeliveryOption
 
 logger = get_task_logger(__name__)
 
@@ -67,7 +67,7 @@ def process_product_order(self, order_id):
     """
 
     order = models.ProductOrder.objects.get(pk=order_id)
-    order.status = OrderStatus.IN_PRODUCTION.value
+    order.status = CustomizableItem.IN_PRODUCTION
     order.additional_status_info = "Order is being processed"
     order.save()
     batch = order.batches.get() # normal product orders have only one batch
@@ -134,7 +134,6 @@ def notify_user_product_batch_available(self, batch_id):
     bind=True,
     max_retries=3,
     default_retry_delay=20,
-    #ErrorMail=utilities.OseoCeleryErrorMail
 )
 def process_online_data_access_item(self, order_item_id, max_tries=3,
                                     sleep_interval=10):
@@ -152,7 +151,6 @@ def process_online_data_access_item(self, order_item_id, max_tries=3,
 
     """
 
-    print("mail class: {}".format(self.ErrorMail))
     order_item = models.OrderItem.objects.get(pk=order_item_id)
     try:
         order_item.process()
@@ -191,25 +189,25 @@ def update_product_order_status(self, order_id):
     order = models.ProductOrder.objects.get(pk=order_id)
     old_order_status = order.status
     batch = order.batches.get()  # ProductOrder's have only one batch
-    if batch.status == OrderStatus.COMPLETED.value and order.packaging != '':
+    if batch.status == CustomizableItem.COMPLETED and order.packaging != '':
         try:
             _package_batch(batch, order.packaging)
         except Exception as e:
-            order.status = OrderStatus.FAILED.value
+            order.status = CustomizableItem.FAILED
             order.additional_status_info = str(e)
             order.save()
             raise
     new_order_status = batch.status
     if (old_order_status != new_order_status or
-                old_order_status == OrderStatus.FAILED.value):
+                old_order_status == CustomizableItem.FAILED):
         order.status = new_order_status
-        if new_order_status == OrderStatus.COMPLETED.value:
+        if new_order_status == CustomizableItem.COMPLETED:
             order.completed_on = datetime.now(pytz.utc)
             order.additional_status_info = ""
-        elif new_order_status == OrderStatus.FAILED.value:
+        elif new_order_status == CustomizableItem.FAILED:
             details = []
             for oi in batch.order_items.all():
-                if oi.status == OrderStatus.FAILED.value:
+                if oi.status == CustomizableItem.FAILED:
                     additional = oi.additional_status_info
                     details.append((oi.id, additional))
             msg = "\n".join(["* Order item {}: {}".format(oi, det) for
@@ -322,11 +320,11 @@ def _process_batch(batch_id):
         except models.SelectedDeliveryOption.DoesNotExist:
             selected = order.selected_delivery_option
         task_func = {
-            DeliveryOption.ONLINE_DATA_ACCESS.value:
+            SelectedDeliveryOption.ONLINE_DATA_ACCESS:
                 process_online_data_access_item,
-            DeliveryOption.ONLINE_DATA_DELIVERY.value:
+            SelectedDeliveryOption.ONLINE_DATA_DELIVERY:
                 process_online_data_delivery_item,
-            DeliveryOption.MEDIA_DELIVERY.value: process_media_delivery_item,
+            SelectedDeliveryOption.MEDIA_DELIVERY: process_media_delivery_item,
         }[selected.delivery_type]
         sig = task_func.subtask((order_item.id,))
         g.append(sig)
@@ -343,7 +341,7 @@ def _package_batch(batch, compression):
                 files_to_package.append(oseo_file.url)
         packed = item_processor.package_files(
             packaging=compression,
-            domain=settings.get_site_domain(),
+            domain=Site.objects.get_current().domain,
             site_name="phony_site_name",
             file_urls=files_to_package,
         )

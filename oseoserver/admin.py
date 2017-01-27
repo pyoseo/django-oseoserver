@@ -7,20 +7,6 @@ from django.utils.html import format_html
 from . import models
 from .server import OseoServer
 
-class SelectedOptionInline(admin.StackedInline):
-    model = models.SelectedOption
-    extra = 1
-
-
-class ExtensionInline(admin.StackedInline):
-    model = models.Extension
-    extra = 1
-
-
-class SelectedDeliveryOptionInline(admin.StackedInline):
-    model = models.SelectedDeliveryOption
-    extra = 1
-
 
 class SelectedPaymentOptionInline(admin.StackedInline):
     model = models.SelectedPaymentOption
@@ -34,24 +20,49 @@ class SelectedSceneSelectionOptionInline(admin.StackedInline):
 
 @admin.register(models.Order)
 class OrderAdmin(admin.ModelAdmin):
-    inlines = (ExtensionInline, SelectedDeliveryOptionInline,)
     fieldsets = (
         (None, {
-            "fields": ("order_type", "status", "status_notification",
-                       "status_changed_on", "completed_on", "user",
-                       "reference", "priority", "packaging",)
+            "fields": (
+                "order_type",
+                "status",
+                "status_notification",
+                "status_changed_on",
+                "completed_on",
+                "user",
+                "reference",
+                "priority",
+                "packaging",
+                "extensions",
+                "selected_options",
+            )
         }),
         ("Further info", {
             "classes": ("collapse",),
-            "fields": ("remark", "additional_status_info",
-                       "mission_specific_status_info")
+            "fields": (
+                "remark",
+                "additional_status_info",
+                "mission_specific_status_info",
+            )
         }),
     )
-    list_display = ("id", "order_type", "status", "status_changed_on", "user",
-                    "show_batches",)
-    list_filter = ("status", "user", "order_type",)
-    readonly_fields = ("status_changed_on", "completed_on",
-                       "last_describe_result_access_request",)
+    list_display = (
+        "id",
+        "order_type",
+        "status",
+        "status_changed_on",
+        "user",
+        "show_batches",
+    )
+    list_filter = (
+        "status",
+        "user",
+        "order_type",
+    )
+    readonly_fields = (
+        "status_changed_on",
+        "completed_on",
+        "last_describe_result_access_request",
+    )
     date_hierarchy = "created_on"
 
 
@@ -91,30 +102,60 @@ class PendingOrderAdmin(admin.ModelAdmin):
 
 @admin.register(models.OrderItem)
 class OrderItemAdmin(admin.ModelAdmin):
-    inlines = (SelectedOptionInline, SelectedDeliveryOptionInline,
-               SelectedPaymentOptionInline,
-               SelectedSceneSelectionOptionInline,)
+    inlines = (
+        SelectedPaymentOptionInline,
+        SelectedSceneSelectionOptionInline,
+    )
     fieldsets = (
         (None, {
-            "fields": ("item_id", "batch", "status",
-                       "available", "status_changed_on",
-                       "completed_on", "identifier", "collection",)
+            "fields": (
+                "item_id",
+                "batch",
+                "status",
+                "available",
+                "status_changed_on",
+                "completed_on",
+                "identifier",
+                "collection",
+            )
         }),
         ("Further info", {
             "classes": ("collapse",),
-            "fields": ("expires_on", "downloads", "last_downloaded_at",
-                       "url", "remark",
-                       "additional_status_info",
-                       "mission_specific_status_info")
+            "fields": (
+                "expires_on",
+                "downloads",
+                "last_downloaded_at",
+                "url",
+                "remark",
+                "additional_status_info",
+                "mission_specific_status_info",
+            )
         }),
     )
-    list_display = ("id", "available", "item_id", "link_to_batch", "link_to_order",
-                    "identifier", "status", "status_changed_on",
-                    "additional_status_info",)
-    list_filter = ("batch__order", "status",)
-    search_fields = ("batch__order__id", "item_id", "identifier",)
+    list_display = (
+        "id",
+        "available",
+        "item_id",
+        "link_to_batch",
+        "link_to_order",
+        "identifier",
+        "status",
+        "status_changed_on",
+    )
+    list_filter = (
+        "status",
+    )
+    search_fields = (
+        "batch__order__id",
+        "item_id",
+        "identifier",
+    )
     date_hierarchy = "status_changed_on"
-    readonly_fields = ("status_changed_on", "completed_on", "available")
+    readonly_fields = (
+        "status_changed_on",
+        "completed_on",
+        "available",
+    )
 
     def link_to_batch(self, obj):
         url = reverse("admin:oseoserver_batch_change", args=(obj.batch_id,))
@@ -132,16 +173,16 @@ class OrderItemAdmin(admin.ModelAdmin):
     link_to_order.allow_tags = True
 
 
-@admin.register(models.Batch)
-class BatchAdmin(admin.ModelAdmin):
-    list_display = ("id", "order", "status", "price", "created_on",
-                    "completed_on", "updated_on",)
+#@admin.register(models.Batch)
+#class BatchAdmin(admin.ModelAdmin):
+#    list_display = ("id", "order", "status", "price", "created_on",
+#                    "completed_on", "updated_on",)
 
 
-@admin.register(models.SubscriptionBatch)
-class SubscriptionBatchAdmin(admin.ModelAdmin):
-    list_display = ("id", "timeslot", "collection", "status", "price",
-                    "created_on", "completed_on", "updated_on",)
+#@admin.register(models.SubscriptionBatch)
+#class SubscriptionBatchAdmin(admin.ModelAdmin):
+#    list_display = ("id", "timeslot", "collection", "status", "price",
+#                    "created_on", "completed_on", "updated_on",)
 
 
 admin.site.register(models.DeliveryInformation)
