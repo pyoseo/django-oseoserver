@@ -4,8 +4,8 @@ import pytest
 import mock
 from mock import DEFAULT
 
-from oseoserver import constants
 from oseoserver import errors
+from oseoserver.models import Order
 from oseoserver import utilities
 
 pytestmark = pytest.mark.unit
@@ -18,10 +18,10 @@ def test_get_generic_order_config_incorrect_order_type():
 
 
 @pytest.mark.parametrize(["order_type", "fake_config"], [
-    (constants.OrderType.PRODUCT_ORDER, "dummy product config"),
-    (constants.OrderType.MASSIVE_ORDER, "dummy massive config"),
-    (constants.OrderType.SUBSCRIPTION_ORDER, "dummy subscription config"),
-    (constants.OrderType.TASKING_ORDER, "dummy tasking config"),
+    (Order.PRODUCT_ORDER, "dummy product config"),
+    (Order.MASSIVE_ORDER, "dummy massive config"),
+    (Order.SUBSCRIPTION_ORDER, "dummy subscription config"),
+    (Order.TASKING_ORDER, "dummy tasking config"),
 ])
 def test_get_generic_order_config(order_type, fake_config):
     with mock.patch("oseoserver.utilities.settings",
@@ -36,7 +36,7 @@ def test_get_generic_order_config(order_type, fake_config):
 def test_validate_processing_option_no_choices():
     fake_option_name = "dummy name"
     fake_parsed_value = "dummy value"
-    order_type = constants.OrderType.PRODUCT_ORDER
+    order_type = Order.PRODUCT_ORDER
     with mock.patch.multiple("oseoserver.utilities",
                              get_order_configuration=DEFAULT,
                              get_generic_order_config=DEFAULT,
@@ -57,14 +57,10 @@ def test_validate_processing_option_no_choices():
 
 
 @pytest.mark.parametrize(["order_type", "expected_exception"], [
-    (constants.OrderType.PRODUCT_ORDER,
-     errors.ProductOrderingNotSupportedError),
-    (constants.OrderType.MASSIVE_ORDER,
-     errors.ProductOrderingNotSupportedError),
-    (constants.OrderType.SUBSCRIPTION_ORDER,
-     errors.SubscriptionNotSupportedError),
-    (constants.OrderType.TASKING_ORDER,
-     errors.FutureProductNotSupportedError)
+    (Order.PRODUCT_ORDER, errors.ProductOrderingNotSupportedError),
+    (Order.MASSIVE_ORDER, errors.ProductOrderingNotSupportedError),
+    (Order.SUBSCRIPTION_ORDER, errors.SubscriptionNotSupportedError),
+    (Order.TASKING_ORDER, errors.FutureProductNotSupportedError)
 ])
 def test_get_order_configuration_disabled(order_type, expected_exception):
     """The proper exceptions are raised when order types are disabled"""
@@ -80,10 +76,10 @@ def test_get_order_configuration_disabled(order_type, expected_exception):
         utilities.get_order_configuration(order_type, fake_collection)
 
 @pytest.mark.parametrize("order_type", [
-    constants.OrderType.PRODUCT_ORDER,
-    constants.OrderType.MASSIVE_ORDER,
-    constants.OrderType.SUBSCRIPTION_ORDER,
-    constants.OrderType.TASKING_ORDER,
+    Order.PRODUCT_ORDER,
+    Order.MASSIVE_ORDER,
+    Order.SUBSCRIPTION_ORDER,
+    Order.TASKING_ORDER,
 ])
 def test_get_order_configuration_enabled(order_type):
     fake_collection = "dummy collection"

@@ -125,17 +125,6 @@ def validate_collection_id(collection_id):
     return result
 
 
-def get_collection_settings(collection_name):
-    for collection_config in settings.get_collections():
-        if collection_config["name"] == collection_name:
-            result = collection_config
-            break
-    else:
-        raise errors.OseoServerError(
-            "Invalid collection: {!r}".format(collection_name))
-    return result
-
-
 def validate_processing_option(name, value, order_type, collection_name):
     """Validate the input arguments against the configured options"""
 
@@ -171,45 +160,11 @@ def validate_processing_option(name, value, order_type, collection_name):
     return parsed_value
 
 
-def get_item_processor(customizable_item):
-    """Return an instance of customizable item's item processor
-
-    Parameters
-    ----------
-    customizable_item: models.Order or models.OrderItem
-        The django model instance representing the current item or order
-
-    """
-
-    try:
-        order_type = constants.OrderType(
-            customizable_item.batch.order.order_type)
-    except AttributeError:
-        order_type = constants.OrderType(
-            customizable_item.order_type)
-    generic_order_config_func = getattr(
-        settings, "get_{}".format(order_type.value.lower()))
-    generic_order_config = generic_order_config_func()
-    processor_class_path = generic_order_config.get("item_processor")
-    return import_class(processor_class_path)
-
-
-# FIXME: Remove this function, it is not needed anymore
-#def get_custom_code(generic_order_configuration, processing_step):
-#    item_processor = generic_order_configuration["processor"]
-#    processing_class = item_processor.python_path
-#    params = item_processor.export_params(processing_step)
-#    logger.debug('processing_class: {}'.format(processing_class))
-#    logger.debug('params: {}'.format(params))
-#    return processing_class, params
-#
-#
-## FIXME: Remove this function, it is not needed anymore
-#def get_processor(order_type, processing_step,
-#                  *instance_args, **instance_kwargs):
-#    processing_class, params = get_custom_code(order_type, processing_step)
-#    instance = import_class(processing_class, *instance_args, **instance_kwargs)
-#    return instance, params
+def get_item_processor(order_type):
+    generic_order_settings = get_generic_order_config(order_type)
+    item_processor_class_path = generic_order_settings["item_processor"]
+    processor = import_class(item_processor_class_path)
+    return processor
 
 
 def _c(value):

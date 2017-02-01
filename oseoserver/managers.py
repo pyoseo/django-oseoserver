@@ -71,14 +71,3 @@ class ProductOrderBatchManager(models.Manager):
 #                option=order_item_spec["payment"])
 #        item.save()
 #        return item
-
-
-class SelectedOptionManager(models.Manager):
-
-    def create_selected_option(self, name, value, customizable_item):
-        selected_option = self.create(
-            option=name,
-            value=value,
-            customizable_item=customizable_item
-        )
-        selected_option.save()

@@ -9,10 +9,8 @@ from pyxb.binding import basis
 from pyxb import namespace
 
 from oseoserver.operations import submit
+from oseoserver.models import Order
 from oseoserver import constants
-from oseoserver.constants import OrderType
-from oseoserver.constants import DeliveryOption
-from oseoserver.constants import DeliveryOptionProtocol
 
 pytestmark = pytest.mark.integration
 
@@ -93,7 +91,7 @@ class TestSubmitOperation(object):
             )
             requested_item = _add_item_options(
                 requested_item, xpath_expression, options[index])
-        order_type = OrderType.PRODUCT_ORDER
+        order_type = Order.PRODUCT_ORDER
         operation = submit.Submit()
         item_spec = operation.validate_order_item(requested_item, order_type)
         print("item_spec: {}".format(item_spec))

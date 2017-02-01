@@ -419,8 +419,6 @@ class OrderItem(CustomizableItem):
     )
     collection = models.CharField(
         max_length=255,
-        choices=[
-            (col["name"], col["name"]) for col in settings.get_collections()]
     )
     identifier = models.CharField(
         max_length=255,
@@ -634,7 +632,6 @@ class OrderItem(CustomizableItem):
 
 @python_2_unicode_compatible
 class SelectedOption(models.Model):
-    objects = managers.SelectedOptionManager()
     option = models.CharField(max_length=255)
     value = models.CharField(max_length=255, help_text='Value for this option')
 
@@ -673,7 +670,10 @@ class SelectedDeliveryOption(models.Model):
     ONLINE_DATA_ACCESS = "onlinedataaccess"
     ONLINE_DATA_DELIVERY = "onlinedatadelivery"
     DELIVERY_CHOICES = [
-        (i, i) for i in locals().keys() if not i.startswith("__")]
+        (MEDIA_DELIVERY, MEDIA_DELIVERY),
+        (ONLINE_DATA_ACCESS, ONLINE_DATA_ACCESS),
+        (ONLINE_DATA_DELIVERY, ONLINE_DATA_DELIVERY),
+    ]
 
     delivery_type = models.CharField(
         max_length=30,
