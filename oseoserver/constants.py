@@ -15,6 +15,7 @@ NAMESPACES = {
     "xml": "http://www.w3.org/XML/1998/namespace",
 }
 
+
 class DeliveryOptionProtocol(enum.Enum):
 
     FTP = "ftp"

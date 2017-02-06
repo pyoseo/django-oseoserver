@@ -25,7 +25,6 @@ import logging
 #from pygments.formatters import HtmlFormatter
 
 from . import settings
-from . import constants
 from . import errors
 
 logger = logging.getLogger(__name__)
@@ -52,8 +51,8 @@ def get_generic_order_config(order_type):
 
     Parameters
     ----------
-    order_type: oseoserver.constants.OrderType
-        The enumeration of the order type
+    order_type: str
+        One of the allowed order types, as defined in oseoserver.models.Order
 
     Returns
     -------
@@ -63,47 +62,8 @@ def get_generic_order_config(order_type):
 
     """
 
-    setting = getattr(settings, "get_{}".format(order_type.value.lower()))
+    setting = getattr(settings, "get_{}".format(order_type.lower()))
     return setting()
-
-
-def get_order_configuration(order_type, collection):
-    """Get the configuration for the input order type and collection.
-
-    Parameters
-    ----------
-    collection: str
-        The requested collection
-    order_type: oseoserver.constants.OrderType
-        The requested order type
-
-    Returns
-    -------
-    dict
-        A dictionary with the configuration of the requested collection
-
-    """
-
-    for collection_config in settings.get_collections():
-        is_collection = collection_config.get("name") == collection
-        type_specific_config = collection_config.get(
-            order_type.value.lower(), {})
-        is_enabled = type_specific_config.get("enabled", False)
-        if is_collection and is_enabled:
-            result = type_specific_config
-            break
-    else:
-        if order_type in (constants.OrderType.PRODUCT_ORDER,
-                          constants.OrderType.MASSIVE_ORDER):
-            raise errors.ProductOrderingNotSupportedError()
-        elif order_type == constants.OrderType.SUBSCRIPTION_ORDER:
-            raise errors.SubscriptionNotSupportedError()
-        elif order_type == constants.OrderType.TASKING_ORDER:
-            raise errors.FutureProductNotSupportedError()
-        else:
-            raise errors.OseoServerError(
-                "Unable to get order configuration")
-    return result
 
 
 def get_option_configuration(option_name):

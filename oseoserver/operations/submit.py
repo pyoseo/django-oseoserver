@@ -29,6 +29,7 @@ from ..utilities import _n, _c
 from ..constants import ENCODING
 from ..models import CustomizableItem
 from ..models import Order
+from ..models import SelectedDeliveryOption
 
 logger = logging.getLogger(__name__)
 
@@ -344,11 +345,24 @@ def create_product_order_item(item, status, item_processor,
 
 def create_option(option_element, order_type, collection_name,
                   item_processor):
+    """Create an option for an order or order item
+
+    Parameters
+    ----------
+    option_element: lxml.etree._Element
+        The option to be parsed
+    order_type: str
+        Type of order being requested.
+    collection_name: str
+        Name of the collection being requested
+    item_processor:
+
+    """
+
     option_name = etree.QName(option_element).localname
     logger.debug("Validating option {!r}...".format(option_name))
     # 1. can the option be used with current collection and order_type?
-    collection_config = utilities.get_order_configuration(
-        order_type, collection_name)
+    collection_config = get_order_configuration(order_type, collection_name)
     if option_name not in collection_config.get("options", []):
         raise errors.InvalidParameterValueError(
             "option", value=option_name)
@@ -452,12 +466,29 @@ def create_order_item(status, item_id, collection,
 
 
 def check_delivery_protocol(protocol, delivery_type, order_type, collection):
-    collection_config = utilities.get_order_configuration(
-        order_type, collection)
-    allowed_protocols = collection_config[
-        order_type.lower()]["{0}_options".format(delivery_type)]
+    """Ensure the provided protocol is enabled in the settings.
+
+    Parameters
+    ----------
+    protocol: str
+        The delivery protocol being evaluated
+    delivery_type: str
+        The type of delivery being requested
+
+    """
+
+    collection_config = get_order_configuration(order_type, collection)
+    config_key = {
+        SelectedDeliveryOption.ONLINE_DATA_ACCESS: (
+            "online_data_access_options"),
+        SelectedDeliveryOption.ONLINE_DATA_DELIVERY: (
+            "online_data_delivery_options"),
+        SelectedDeliveryOption.MEDIA_DELIVERY: (
+            "media_delivery_options"),
+    }[delivery_type]
+    allowed_protocols = collection_config[order_type.lower()][config_key]
     if protocol not in allowed_protocols:
-        raise errors.InvalidParameterValueError()
+        raise errors.InvalidParameterValueError(locator="protocol")
 
 
 def create_delivery_option(oseo_delivery, collection, order_type):
@@ -466,14 +497,17 @@ def create_delivery_option(oseo_delivery, collection, order_type):
             oseo_delivery.mediaDelivery.packageMedium,
             _c(oseo_delivery.mediaDelivery.shippingInstructions)
         ))
+        delivery_type = models.SelectedDeliveryOption.MEDIA_DELIVERY
     else:
         if oseo_delivery.onlineDataAccess is not None:
             details = oseo_delivery.onlineDataAccess.protocol
         else:
             details = oseo_delivery.onlineDataDelivery.protocol
-        delivery_type = ("online_data_access" if
-                         oseo_delivery.onlineDataAccess is not None
-                         else "online_data_delivery")
+        delivery_type = (
+            models.SelectedDeliveryOption.ONLINE_DATA_ACCESS if
+            oseo_delivery.onlineDataAccess is not None else
+            models.SelectedDeliveryOption.ONLINE_DATA_DELIVERY
+        )
         check_delivery_protocol(
             protocol=details,
             delivery_type=delivery_type,
@@ -481,6 +515,7 @@ def create_delivery_option(oseo_delivery, collection, order_type):
             collection=collection
         )
     delivery_option = models.SelectedDeliveryOption(
+        delivery_type=delivery_type,
         annotation=_c(oseo_delivery.productAnnotation),
         copies=oseo_delivery.numberOfCopies or 1,
         special_instructions=_c(oseo_delivery.specialInstructions),
@@ -537,6 +572,44 @@ def get_order_type(order_specification):
         if reference == Order.MASSIVE_ORDER_REFERENCE:
             order_type = Order.MASSIVE_ORDER
     return order_type
+
+
+def get_order_configuration(order_type, collection):
+    """Get the configuration for the input order type and collection.
+
+    Parameters
+    ----------
+    collection: str
+        The requested collection
+    order_type: oseoserver.constants.OrderType
+        The requested order type
+
+    Returns
+    -------
+    dict
+        A dictionary with the configuration of the requested collection
+
+    """
+
+    for collection_config in settings.get_collections():
+        is_collection = collection_config.get("name") == collection
+        type_specific_config = collection_config.get(
+            order_type.lower(), {})
+        is_enabled = type_specific_config.get("enabled", False)
+        if is_collection and is_enabled:
+            result = type_specific_config
+            break
+    else:
+        if order_type in (Order.PRODUCT_ORDER, Order.MASSIVE_ORDER):
+            raise errors.ProductOrderingNotSupportedError()
+        elif order_type == Order.SUBSCRIPTION_ORDER:
+            raise errors.SubscriptionNotSupportedError()
+        elif order_type == Order.TASKING_ORDER:
+            raise errors.FutureProductNotSupportedError()
+        else:
+            raise errors.OseoServerError(
+                "Unable to get order configuration")
+    return result
 
 
 def _get_delivery_address(delivery_address_type):

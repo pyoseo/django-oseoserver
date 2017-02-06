@@ -216,8 +216,12 @@ class DeliveryInformation(AbstractDeliveryAddress):
 
 @python_2_unicode_compatible
 class InvoiceAddress(AbstractDeliveryAddress):
-    order = models.OneToOneField("Order", null=True,
-                                 related_name="invoice_address")
+    order = models.OneToOneField(
+        "Order",
+        blank=True,
+        null=True,
+        related_name="invoice_address"
+    )
 
     class Meta:
         verbose_name_plural = "invoice addresses"
@@ -233,7 +237,8 @@ class OnlineAddress(models.Model):
         (SFTP, SFTP),
         (FTPS, FTPS),
     )
-    delivery_information = models.ForeignKey('DeliveryInformation')
+    delivery_information = models.ForeignKey(
+        'DeliveryInformation', related_name="online_addresses")
     protocol = models.CharField(max_length=20, default=FTP,
                                 choices=PROTOCOL_CHOICES)
     server_address = models.CharField(max_length=255)
