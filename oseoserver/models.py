@@ -23,6 +23,7 @@ import sys
 import traceback
 import logging
 
+import celery
 from django.db import models
 from django.conf import settings as django_settings
 from django.utils.encoding import python_2_unicode_compatible
@@ -30,7 +31,6 @@ import pytz
 from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
-from . import managers
 from . import settings
 from . import utilities
 from .utilities import _n
@@ -179,7 +179,12 @@ class Extension(models.Model):
 
 @python_2_unicode_compatible
 class DeliveryInformation(AbstractDeliveryAddress):
-    order = models.OneToOneField("Order", related_name="delivery_information")
+    order = models.OneToOneField(
+        "Order",
+        null=True,
+        blank=True,
+        related_name="delivery_information"
+    )
 
     def create_oseo_delivery_information(self):
         """Create an OSEO DeliveryInformationType"""
@@ -285,10 +290,8 @@ class Order(CustomizableItem):
     extensions = models.ForeignKey(
         "Extension",
         related_name="order",
-    )
-    selected_options = models.ForeignKey(
-        'SelectedOption',
-        related_name='order'
+        blank=True,
+        null=True
     )
     selected_delivery_option = models.OneToOneField(
         'SelectedDeliveryOption',
@@ -325,19 +328,50 @@ class Order(CustomizableItem):
         choices=STATUS_NOTIFICATION_CHOICES
     )
 
-    def show_batches(self):
-        return ', '.join([str(b.id) for b in self.batches.all()])
-    show_batches.short_description = 'available batches'
+    def add_batch(self, batch):
+        batch_class = batch.__class__.__name__
+        if batch_class == "ProductOrderBatch":
+            self.oseoserver_productorderbatch_batches.add(batch)
+        elif batch_class == "SubscriptionSpecificationBatch":
+            existing = (
+                self.oseoserver_subscriptionspecificationbatch_batches.all())
+            if len(existing) > 0:
+                raise RuntimeError("Only a single subscription specification "
+                                   "batch is allowed per order")
+            else:
+                self.oseoserver_subscriptionspecificationbatch_batches.add(
+                    batch)
+        elif batch_class == "SubscriptionProcessingBatch":
+            self.oseoserver_subscriptionprocessingbatch_batches.add(batch)
+        else:
+            raise NotImplementedError
 
-    #def create_batch(self, item_status, additional_status_info,
-    #                 *order_items_spec):
-    #    batch = Batch(order=self, status=self.status)
-    #    batch.save()
-    #    for item_spec in order_items_spec:
-    #        batch.create_order_item(item_status, additional_status_info,
-    #                                item_spec)
-    #    self.batches.add(batch)
-    #    return batch
+    def dispatch(self, batch):
+        """Dispatch the batch for processing in the queue."""
+        celery.current_app.send_task(
+            "oseoserver.tasks.process_product_order_batch",
+            (batch.id,)
+        )
+
+
+    def _regular_batches(self):
+        batch_manager = {
+            self.PRODUCT_ORDER: self.oseoserver_productorderbatch_batches,
+            self.SUBSCRIPTION_ORDER: (
+                self.oseoserver_subscriptionprocessingbatch_batches),
+        }.get(self.order_type)
+        return batch_manager
+    regular_batches = property(_regular_batches)
+
+    def _subscription_specification_batch(self):
+        try:
+            result = (
+                self.oseoserver_subscriptionspecificationbatch_batches.get())
+        except models.ObjectDoesNotExist:
+            result = None
+        return result
+    subscription_specification_batch = property(
+        _subscription_specification_batch)
 
     def create_oseo_order_monitor(
             self, presentation="brief"):
@@ -394,8 +428,17 @@ class Order(CustomizableItem):
 
 
 @python_2_unicode_compatible
+class OrderPendingModerationManager(models.Manager):
+
+    def get_queryset(self):
+        return super(OrderPendingModerationManager,
+                     self).get_queryset().filter(
+            status=Order.SUBMITTED)
+
+
+@python_2_unicode_compatible
 class OrderPendingModeration(Order):
-    objects = managers.OrderPendingModerationManager()
+    objects = OrderPendingModerationManager()
 
     class Meta:
         proxy = True
@@ -407,12 +450,6 @@ class OrderItem(CustomizableItem):
     extension = models.ForeignKey(
         "Extension",
         related_name="order_item",
-        null=True,
-        blank=True
-    )
-    selected_options = models.ForeignKey(
-        'SelectedOption',
-        related_name='order_item',
         null=True,
         blank=True
     )
@@ -482,7 +519,7 @@ class OrderItem(CustomizableItem):
         super(OrderItem, self).save(*args, **kwargs)
         batch = self.get_batch()
         if batch:
-            self.batch.update_status()
+            batch.update_status()
 
     def export_options(self):
         valid_options = dict()
@@ -636,9 +673,30 @@ class OrderItem(CustomizableItem):
 
 
 @python_2_unicode_compatible
-class SelectedOption(models.Model):
+class SelectedItemOption(models.Model):
     option = models.CharField(max_length=255)
     value = models.CharField(max_length=255, help_text='Value for this option')
+    item = models.ForeignKey(
+        "OrderItem",
+        related_name="selected_options",
+        null=True,
+        blank=True
+    )
+
+    def __str__(self):
+        return self.value
+
+
+@python_2_unicode_compatible
+class SelectedOrderOption(models.Model):
+    option = models.CharField(max_length=255)
+    value = models.CharField(max_length=255, help_text='Value for this option')
+    order = models.ForeignKey(
+        "Order",
+        related_name="selected_options",
+        null=True,
+        blank=True
+    )
 
     def __str__(self):
         return self.value
@@ -712,6 +770,7 @@ class Batch(models.Model):
     order = models.ForeignKey(
         "Order",
         null=True,
+        blank=True,
         related_name="%(app_label)s_%(class)s_batches"
     )
     created_on = models.DateTimeField(auto_now_add=True)
@@ -746,12 +805,9 @@ class Batch(models.Model):
                 new_status = item.status
                 break
         else:
-            if done_items == self.order_items.count():
-                new_status = Order.COMPLETED
-            else:
-                new_status = Order.IN_PRODUCTION
+            new_status = Order.COMPLETED
         now = dt.datetime.now(pytz.utc)
-        self.status = new_status.value
+        self.status = new_status
         self.updated_on = now
         if new_status in (CustomizableItem.COMPLETED,
                           CustomizableItem.TERMINATED,
@@ -763,55 +819,10 @@ class Batch(models.Model):
             self.completed_on = None
         self.save()
 
-    #def save(self, *args, **kwargs):
-    #    """Reimplment save() method in order to update the batch's order."""
-    #    super(Batch, self).save(*args, **kwargs)
-    #    self.order.update_status()
 
     def price(self):
         total = Decimal(0)
         return total
-
-    #def create_order_item(self, status, additional_status_info,
-    #                      order_item_spec):
-    #    item = OrderItem(
-    #        batch=self,
-    #        status=status,
-    #        additional_status_info=additional_status_info,
-    #        remark=order_item_spec["order_item_remark"],
-    #        collection=order_item_spec["collection"],
-    #        identifier=order_item_spec.get("identifier", ""),
-    #        item_id=order_item_spec["item_id"]
-    #    )
-    #    item.save()
-    #    for name, value in order_item_spec["option"].items():
-    #        # assuming that the option has already been validated
-    #        selected_option = SelectedOption(option=name, value=value,
-    #                                         customizable_item=item)
-    #        selected_option.save()
-    #    for name, value in order_item_spec["scene_selection"].items():
-    #        item.selected_scene_selection_options.add(
-    #            SelectedSceneSelectionOption(option=name, value=value))
-    #    delivery = order_item_spec["delivery_options"]
-    #    if delivery is not None:
-    #        copies = 1 if delivery["copies"] is None else delivery["copies"]
-    #        sdo = SelectedDeliveryOption(
-    #            customizable_item=item,
-
-    #            delivery_type=None,
-    #            delivery_details=None,
-
-    #            annotation=delivery["annotation"],
-    #            copies=copies,
-    #            special_instructions=delivery["special_instructions"],
-    #            option=delivery["type"]
-    #        )
-    #        sdo.save()
-    #    if order_item_spec["payment"] is not None:
-    #        item.selected_payment_option = SelectedPaymentOption(
-    #            option=order_item_spec["payment"])
-    #    item.save()
-    #    return item
 
     def create_oseo_items_status(self):
         items_status = []

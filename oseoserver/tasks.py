@@ -1,4 +1,4 @@
-# Copyright 2015 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,8 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Celery tasks for pyoseo
+"""Celery tasks for oseoserver.
 
 The celery worker can be started with the command:
 
@@ -53,25 +52,25 @@ logger = get_task_logger(__name__)
 
 # TODO - Find another way to send error e-mails now that celery dropped it from tasks
 
-@shared_task(bind=True)
-def process_product_order(self, order_id):
-    """Process a product order.
-
-    Parameters
-    ----------
-
-    order_id: int
-        The primary key of the order in django's database. This is used to
-        retrieve order information at the time of processing.
-
-    """
-
-    order = models.ProductOrder.objects.get(pk=order_id)
-    order.status = CustomizableItem.IN_PRODUCTION
-    order.additional_status_info = "Order is being processed"
-    order.save()
-    batch = order.batches.get() # normal product orders have only one batch
-    process_product_order_batch.apply_async((batch.id,))
+#@shared_task(bind=True)
+#def process_product_order(self, order_id):
+#    """Process a product order.
+#
+#    Parameters
+#    ----------
+#
+#    order_id: int
+#        The primary key of the order in django's database. This is used to
+#        retrieve order information at the time of processing.
+#
+#    """
+#
+#    order = models.ProductOrder.objects.get(pk=order_id)
+#    order.status = CustomizableItem.IN_PRODUCTION
+#    order.additional_status_info = "Order is being processed"
+#    order.save()
+#    batch = order.batches.get() # normal product orders have only one batch
+#    process_product_order_batch.apply_async((batch.id,))
 
 
 @shared_task(bind=True)
@@ -104,18 +103,19 @@ def process_product_order_batch(self, batch_id, notify_user=False):
 
     """
 
-    celery_group = _process_batch(batch_id)
     batch = models.Batch.objects.get(pk=batch_id)
-    c = chain(
-        celery_group,
+    logger.debug("batch: {0}".format(batch.id))
+    order_item_tasks = create_product_batch_group(batch)
+    batch_chain = chain(
+        order_item_tasks,
         update_product_order_status.subtask((batch.order.id,), immutable=True)
     )
     if notify_user:
-        job = chain(c,
+        job = chain(batch_chain,
                     notify_user_product_batch_available.subtask((batch_id,)))
         job.apply_async()
     else:
-        c.apply_async()
+        batch_chain.apply_async()
 
 
 @shared_task(bind=True)
@@ -300,6 +300,24 @@ def terminate_expired_subscriptions(self):
 #            )
 #    job = group(g)
 #    job.apply_async()
+
+
+def create_product_batch_group(batch):
+    group_tasks = []
+    for order_item in batch.order_items.all():
+        delivery_option = (order_item.selected_delivery_option or
+                           batch.order.selected_delivery_option)
+        task_function = {
+            SelectedDeliveryOption.ONLINE_DATA_ACCESS:
+                process_online_data_access_item,
+            SelectedDeliveryOption.ONLINE_DATA_DELIVERY:
+                process_online_data_delivery_item,
+            SelectedDeliveryOption.MEDIA_DELIVERY: process_media_delivery_item,
+        }[delivery_option.delivery_type]
+        order_item_task_signature = task_function.subtask((order_item.id,))
+        group_tasks.append(order_item_task_signature)
+    return group(*group_tasks)
+
 
 
 def _process_batch(batch_id):

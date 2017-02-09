@@ -60,8 +60,20 @@ def test_submit_invalid_status_notification(status_notification):
 
 
 @pytest.mark.django_db
+def test_submit_quotation_id():
+    request = oseo.Submit(
+        service="OS",
+        version="1.0.0",
+        statusNotification="None",
+        quotationId="1"
+    )
+    with pytest.raises(NotImplementedError):
+        submit.submit(request, "fake_user")
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize("protocol", [
-    "http",
+    "sftp",
     "ftp"
 ])
 def test_create_order_delivery_information(protocol):

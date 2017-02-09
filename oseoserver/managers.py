@@ -1,16 +1,7 @@
 from django.utils.encoding import python_2_unicode_compatible
 from django.db import models
 
-from . import constants
 
-
-@python_2_unicode_compatible
-class OrderPendingModerationManager(models.Manager):
-
-    def get_queryset(self):
-        return super(OrderPendingModerationManager,
-                     self).get_queryset().filter(
-            status=constants.OrderStatus.SUBMITTED.value)
 
 
 class OrderManager(models.Manager):

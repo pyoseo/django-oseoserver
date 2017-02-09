@@ -5,7 +5,7 @@ from django.core.urlresolvers import reverse
 from django.utils.html import format_html
 
 from . import models
-from .server import OseoServer
+from . import server
 
 
 class SelectedPaymentOptionInline(admin.StackedInline):
@@ -51,7 +51,6 @@ class OrderAdmin(admin.ModelAdmin):
         "status",
         "status_changed_on",
         "user",
-        "show_batches",
     )
     list_filter = (
         "status",
@@ -88,13 +87,11 @@ class PendingOrderAdmin(admin.ModelAdmin):
         return False
 
     def approve_order(self, request, queryset):
-        server = OseoServer()
         for order in queryset:
             server.moderate_order(order, True)
     approve_order.short_description = "Approve selected orders"
 
     def reject_order(self, request, queryset):
-        server = OseoServer()
         for order in queryset:
             server.moderate_order(order, False)
     reject_order.short_description = "Reject selected orders"

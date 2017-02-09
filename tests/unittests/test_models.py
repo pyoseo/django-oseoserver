@@ -1,6 +1,6 @@
 """unit tests for oseoserver.models"""
 
-from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
 import pytest
 
 from oseoserver import models
@@ -10,17 +10,36 @@ pytestmark = pytest.mark.unit
 
 class TestOrderItem(object):
 
-    def test_validation_invalid_collection(self, settings):
-        settings.OSEOSERVER_COLLECTIONS = [{"name": "phony_collection"},]
-        with pytest.raises(ValidationError):
-            item = models.OrderItem(
-                collection="fake_collection",
-                item_id="fake_item_id",
-            )
-            item.full_clean()
+    @pytest.mark.django_db
+    def test_create_no_batch(self):
+        item = models.OrderItem.objects.create(
+            collection="fake_collection",
+            item_id="fake_item_id",
+        )
 
-    #def test_creation(self):
-    #    item = models.OrderItem.objects.create(
-    #        collection="fake_collection",
-    #        item_id="fake_item_id",
-    #    )
+    @pytest.mark.django_db
+    def test_create_with_batch(self):
+        batch = models.ProductOrderBatch.objects.create()
+        item = models.OrderItem.objects.create(
+            collection="fake_collection",
+            item_id="fake_item_id",
+            product_order_batch=batch
+        )
+
+
+class TestProductOrder():
+
+    @pytest.mark.django_db
+    def test_create(self, admin_user):
+        #user = get_user_model().objects.create()
+        order = models.Order.objects.create(user=admin_user)
+        assert order.order_type == models.Order.PRODUCT_ORDER
+
+    @pytest.mark.django_db
+    def test_add_batch_product_order(self, admin_user):
+        order = models.Order.objects.create(user=admin_user)
+        batch = models.ProductOrderBatch.objects.create()
+        order.add_batch(batch)
+        order.save()
+        assert order.regular_batches.count() == 1
+

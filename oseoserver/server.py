@@ -44,6 +44,7 @@ that preform each OSEO operation.
 
 from __future__ import absolute_import
 from datetime import datetime
+import importlib
 import logging
 
 from django.db.models import Q
@@ -53,18 +54,89 @@ import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows as ows_bindings
 import pyxb
 
-from . import tasks
+from . import errors
+from . import mailsender
 from . import models
 from .models import Order
 from .models import CustomizableItem
-from . import errors
+from . import tasks
 from . import utilities
 from .constants import ENCODING
-from .mailsender import send_moderation_email
-from .mailsender import send_product_order_moderated_email
-from .mailsender import send_subscription_moderated_email
 
 logger = logging.getLogger(__name__)
+
+
+def moderate_order(order, approved, rejection_details=None, send_email=True):
+    """Act upon the order after it has been moderated by an admin.
+
+    The OSEO standard does not really define any moderation workflow
+    for orders. As such, none of the defined statuses fits exactly with
+    this process. We are abusing the CANCELLED status for this.
+
+    Parameters
+    ----------
+    order: oseoserver.models.Order
+        The order that has been moderated
+    approved: bool
+        The moderation result
+    rejection_details: str, optional
+        Any additional details explaining why the order has been rejected
+
+    """
+
+    if send_email:
+        mail_recipients = get_user_model().objects.filter(
+            Q(oseoserver_order_orders__id=order.id) | Q(is_staff=True)
+        ).exclude(email="").distinct("email")
+    else:
+        mail_recipients = None
+    if order.order_type == Order.PRODUCT_ORDER:
+        _moderate_product_order(
+            order=order,
+            approved=approved,
+            rejection_details=rejection_details,
+            mail_recipients=mail_recipients
+        )
+    elif order.order_type == Order.SUBSCRIPTION_ORDER:
+        _moderate_subscription_order(
+            order=order,
+            approved=approved,
+            rejection_details=rejection_details,
+            mail_recipients=mail_recipients
+        )
+    else:
+        raise NotImplementedError
+    logger.debug("Order {0!r} has been {1}".format(order.id, order.status))
+
+
+def _moderate_product_order(order, approved, rejection_details=None,
+                           mail_recipients=None):
+    if approved:
+        order.status = CustomizableItem.ACCEPTED
+        order.additional_status_info = (
+            "Order has been approved and is waiting in the "
+            "processing queue for an available slot"
+        )
+        order.save()
+        logger.debug("Dispatching order...")
+        batch = order.regular_batches.get()  # productorder has only one batch
+        order.dispatch(batch)
+    else:
+        order.status = CustomizableItem.CANCELLED
+        order.additional_status_info = rejection_details or (
+            "Order request has been rejected by the administrators")
+    order.save()
+    if mail_recipients is not None:
+        mailsender.send_product_order_moderated_email(
+            order=order,
+            approved=approved,
+            recipients=mail_recipients
+        )
+
+
+def _moderate_subscription_order(order, approved, rejection_details=None,
+                                 mail_recipients=None):
+    raise NotImplementedError
 
 
 class OseoServer(object):
@@ -82,23 +154,25 @@ class OseoServer(object):
 
     OSEO_VERSION = "1.0.0"
 
-    OPERATION_CLASSES = {
+    OPERATION_CALLABLES = {
         "GetCapabilities": "oseoserver.operations.getcapabilities."
-                           "GetCapabilities",
-        "Submit": "oseoserver.operations.submit.Submit",
+                           "get_capabilities",
+        "Submit": "oseoserver.operations.submit.submit",
         "DescribeResultAccess": "oseoserver.operations.describeresultaccess."
-                                "DescribeResultAccess",
-        "GetOptions": "oseoserver.operations.getoptions.GetOptions",
-        "GetStatus": "oseoserver.operations.getstatus.GetStatus",
-        "Cancel": "oseoserver.operations.cancel.Cancel",
+                                "describe_result_access",
+        "GetOptions": "oseoserver.operations.getoptions.get_options",
+        "GetStatus": "oseoserver.operations.getstatus.get_status",
+        "Cancel": "oseoserver.operations.cancel.cancel",
     }
 
     def process_request(self, request_data, user):
         """Entry point for the ordering service.
 
-        This method receives the raw request data as a string and then parses
-        it into a valid pyxb OSEO object. It will then send the request to the
-        appropriate operation processing class.
+        This method receives the request data and then parses it into a
+        valid pyxb OSEO object. It will then send the request to the
+        appropriate operation processing function. Later, after the request has
+        been processed, it may send order processing tasks to the processing
+        queue, according to the configured behaviour on automatic approvals.
 
         Parameters
         ----------
@@ -121,10 +195,15 @@ class OseoServer(object):
         if op_name == "Submit":
             response, order = result
             if order.status == CustomizableItem.SUBMITTED:
-                send_moderation_email(order.order_type, order.id)
+                logger.debug(
+                    "Order {0!r} is {1}, sending moderation email to "
+                    "admins".format(order.id, order.status)
+                )
+                mailsender.send_moderation_request_email(
+                    order.order_type, order.id)
             elif order.status == CustomizableItem.ACCEPTED:
                 if order.order_type == Order.PRODUCT_ORDER:
-                    order.dispatch()
+                    moderate_order(order, approved=True, send_email=False)
             else:  # if order is not accepted or submitted we probably
                    # should raise an error
                 pass
@@ -187,6 +266,16 @@ class OseoServer(object):
                 pyxb.SimpleFacetValueError):
             raise errors.NoApplicableCodeError()
         return oseo_request
+
+    def dispatch_subscriptions(self, timeslot, collection):
+        """Create new subscription batch and send it to the processing queue"""
+        # for each subscription order, call self.dispatch_subscription_batch
+        raise NotImplementedError
+
+    def dispatch_subscription_batch(self, order, timeslot, collection):
+        #   create subscription_processing_batch
+        #   call order.dispatch(batch)
+        raise NotImplementedError
 
     # the code that checks the value of the email notification extension
     # does not belong in oseoserver. This could be simplified by
@@ -287,58 +376,6 @@ class OseoServer(object):
             raise ValueError("Invalid order type: {}".format(
                 order.order_type.name))
 
-    def moderate_order(self, order, approved, rejection_details=None):
-        """Act upon order moderation by the admin.
-
-        The OSEO standard does not really define any moderation workflow
-        for orders. As such, none of the defined statuses fits exactly with
-        this process. We are abusing the CANCELLED status for this.
-
-        Parameters
-        ----------
-        order: oseoserver.models.Order
-            The order that has been moderated
-        approved: bool
-            The moderation result
-        rejection_details: str, optional
-            Any additional details explaining why the order has been rejected
-
-        """
-
-        if approved:
-            order.status = CustomizableItem.ACCEPTED
-            if order.order_type == Order.PRODUCT_ORDER:
-                order.additional_status_info = (
-                    "Order has been approved and is waiting in the "
-                    "processing queue for an available slot"
-                )
-                order.save()
-                order.productorder.dispatch()
-            elif order.order_type == Order.SUBSCRIPTION_ORDER:
-                order.additional_status_info = (
-                    "Subscription has been approved and will be processed "
-                    "whenever new products become available"
-                )
-            else:
-                raise NotImplementedError
-        else:
-            order.status = CustomizableItem.CANCELLED
-            order.additional_status_info = rejection_details or (
-                "Order request has been rejected by the administrators")
-        order.save()
-        self._send_order_moderation_email(approved, order)
-
-    def _send_order_moderation_email(self, approved, order):
-        mail_recipients = get_user_model().objects.filter(
-            Q(orders__id=order.id) | Q(is_staff=True)
-        ).exclude(email="").distinct("email")
-        mail_sender = {
-            Order.PRODUCT_ORDER: send_product_order_moderated_email,
-            Order.SUBSCRIPTION_ORDER: send_subscription_moderated_email,
-        }.get(order.order_type)
-        if mail_sender is not None:
-            mail_sender(order, approved, mail_recipients)
-
     def _clone_subscription_batch(self, order_item_identifiers,
                                   subscription_spec_batch, timeslot,
                                   collection, new_batch):
@@ -400,8 +437,26 @@ class OseoServer(object):
             op.save()
             new_item.selected_scene_selection_options.add(op)
 
-    def _get_operation(self, pyxb_request):
-        oseo_op = pyxb_request.toDOM().firstChild.tagName.partition(":")[-1]
-        op = self.OPERATION_CLASSES[oseo_op]
-        return utilities.import_class(op), oseo_op
+    def _get_operation(self, request):
+        """Dynamically import the requested operation function at runtime.
 
+        Parameters
+        ----------
+        request: pyxb.bundles.opengis.oseo_1_0 subtype
+
+        Returns
+        -------
+        function
+            The operation function that can be called in order to process the
+            request.
+        str
+            The name of the OSEO operation that has been requested
+
+        """
+
+        oseo_op = request.toDOM().firstChild.tagName.partition(":")[-1]
+        operation_function_path = self.OPERATION_CALLABLES[oseo_op]
+        module_path, _, function_name = operation_function_path.rpartition(".")
+        the_module = importlib.import_module(module_path)
+        the_operation = getattr(the_module, function_name)
+        return the_operation, oseo_op

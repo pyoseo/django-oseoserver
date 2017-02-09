@@ -14,18 +14,19 @@ from django.conf import settings as django_settings
 from mailqueue.models import MailerMessage
 
 from . import settings as oseo_settings
+from .models import Order
 
 logger = logging.getLogger(__name__)
 
 MAIL_SUBJECT = "Copernicus Global Land Service"
 
 
-def send_moderation_email(order_type, order_id):
+def send_moderation_request_email(order_type, order_id):
     """Send an e-mail to admins informing that an order needs approval.
 
     Parameters
     ----------
-    order_type: oseoserver.constants.OrderType
+    order_type: str
         The type of order that is waiting to be moderated
     order_id: int
         The order's id in the database
@@ -44,7 +45,7 @@ def send_moderation_email(order_type, order_id):
     }
     msg = render_to_string(template, context)
     subject = "Copernicus Global Land Service - {} {} awaits " \
-              "moderation".format(order_type.value, order_id)
+              "moderation".format(order_type, order_id)
     UserModel = get_user_model()
     recipients = UserModel.objects.filter(is_staff=True).exclude(email="")
     if any(recipients):
@@ -52,7 +53,7 @@ def send_moderation_email(order_type, order_id):
     else:
         logger.warning(
             "Could not dispatch order moderation e-mail for {0}:{1} - None "
-            "of the admin users has a valid e-mail.".format(order_type.value,
+            "of the admin users has a valid e-mail.".format(order_type,
                                                             order_id)
         )
 
@@ -126,7 +127,10 @@ def send_product_order_moderated_email(order, approved, recipients):
     }
     subject = " - ".join((
         MAIL_SUBJECT,
-        "Order has been {0}".format("accepted" if approved else "rejected")
+        "Order {reference!r} has been {status}".format(
+            reference=order.reference,
+            status=order.status.lower()
+        )
     ))
     msg = render_to_string(template, context)
     send_email(subject, msg, recipients, html=True)

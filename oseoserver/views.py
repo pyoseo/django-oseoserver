@@ -9,7 +9,6 @@ from lxml import etree
 
 from .constants import ENCODING
 from . import errors
-from . import utilities
 from . import soap
 from .server import OseoServer
 
@@ -39,6 +38,7 @@ def oseo_endpoint(request):
         request_data = soap.unwrap_request(request_element)[0]
         logger.debug("user: {}".format(request.user))
         if request.user is None or not request.user.is_active:
+            logger.error("authentication failed: {}".format(request.user))
             raise errors.OseoError(
                 code="AuthenticationFailed",
                 text="Invalid or missing identity information"
@@ -46,6 +46,7 @@ def oseo_endpoint(request):
         response = server.process_request(request_data, request.user)
         status_code = 200
     except errors.OseoError as err:
+        logger.error(err)
         response = server.create_exception_report(
             err.code, err.text, err.locator)
         status_code = 401 if err.code == "AuthorizationFailed" else 400
