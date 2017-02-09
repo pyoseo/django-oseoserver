@@ -23,33 +23,31 @@ from oseoserver import errors
 from oseoserver.server import OseoServer
 
 # TODO - Use the status_notification
-class Cancel(object):
+def cancel(request, user, **kwargs):
+    """Implements the OSEO Cancel operation.
 
-    def __call__(self, request, user, **kwargs):
-        """Implements the OSEO Cancel operation.
+    :param request:
+    :param user:
+    :param kwargs:
+    :return:
+    """
 
-        :param request:
-        :param user:
-        :param kwargs:
-        :return:
-        """
-
-        try:
-            order = models.Order.objects.get(id=request.orderId)
-        except models.Order.DoesNotExist:
-            raise errors.InvalidOrderIdentifierError()
-        status_notification = self.validate_status_notification(request)
-        s = OseoServer()
-        if not self._user_is_authorized(user, order):
-            raise errors.AuthorizationFailedError()
-        if order.order_type.name == models.Order.PRODUCT_ORDER:
-            raise errors.ServerError("Cancellation of product orders is "
-                                     "not implemented")
-        elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
-            msg = "Subscription has been cancelled by user's request"
-            s.moderate_order(order, False, rejection_details=msg)
-        else:
-            raise errors.ServerError("Cancellation of tasking orders is "
-                                     "not implemented")
-        response = oseo.CancelAck(status="success")
-        return response, None
+    try:
+        order = models.Order.objects.get(id=request.orderId)
+    except models.Order.DoesNotExist:
+        raise errors.InvalidOrderIdentifierError()
+    status_notification = validate_status_notification(request)
+    s = OseoServer()
+    if not _user_is_authorized(user, order):
+        raise errors.AuthorizationFailedError()
+    if order.order_type.name == models.Order.PRODUCT_ORDER:
+        raise errors.ServerError("Cancellation of product orders is "
+                                 "not implemented")
+    elif order.order_type.name == models.Order.SUBSCRIPTION_ORDER:
+        msg = "Subscription has been cancelled by user's request"
+        s.moderate_order(order, False, rejection_details=msg)
+    else:
+        raise errors.ServerError("Cancellation of tasking orders is "
+                                 "not implemented")
+    response = oseo.CancelAck(status="success")
+    return response, None
