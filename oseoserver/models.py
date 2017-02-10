@@ -328,24 +328,28 @@ class Order(CustomizableItem):
         choices=STATUS_NOTIFICATION_CHOICES
     )
 
+    def __str__(self):
+        return '{0.order_type}, {0.id}, {0.reference!r}'.format(self)
+
     def add_batch(self, batch):
+        """Add a new batch to the order."""
         batch_class = batch.__class__.__name__
-        if batch_class == "ProductOrderBatch":
-            self.oseoserver_productorderbatch_batches.add(batch)
-        elif batch_class == "SubscriptionSpecificationBatch":
+        if batch_class == "ProcessingBatch":
+            self.oseoserver_processingbatches.add(batch)
+        elif batch_class == "SpecificationBatch":
             existing = (
-                self.oseoserver_subscriptionspecificationbatch_batches.all())
+                self.oseoserver_specificationbatches.all())
             if len(existing) > 0:
-                raise RuntimeError("Only a single subscription specification "
-                                   "batch is allowed per order")
+                raise RuntimeError(
+                    "Only a single specification batch is allowed per order")
             else:
-                self.oseoserver_subscriptionspecificationbatch_batches.add(
-                    batch)
+                self.oseoserver_specificationbatches.add(batch)
         elif batch_class == "SubscriptionProcessingBatch":
-            self.oseoserver_subscriptionprocessingbatch_batches.add(batch)
+            self.oseoserver_subscriptionprocessingbatches.add(batch)
         else:
             raise NotImplementedError
 
+    # TODO - Remove this method
     def dispatch(self, batch):
         """Dispatch the batch for processing in the queue."""
         celery.current_app.send_task(
@@ -353,25 +357,23 @@ class Order(CustomizableItem):
             (batch.id,)
         )
 
-
-    def _regular_batches(self):
+    def _processing_batches(self):
         batch_manager = {
-            self.PRODUCT_ORDER: self.oseoserver_productorderbatch_batches,
+            self.PRODUCT_ORDER: self.oseoserver_processingbatches,
+            self.MASSIVE_ORDER: self.oseoserver_processingbatches,
             self.SUBSCRIPTION_ORDER: (
-                self.oseoserver_subscriptionprocessingbatch_batches),
+                self.oseoserver_subscriptionprocessingbatches),
         }.get(self.order_type)
         return batch_manager
-    regular_batches = property(_regular_batches)
+    processing_batches = property(_processing_batches)
 
-    def _subscription_specification_batch(self):
+    def _specification_batch(self):
         try:
-            result = (
-                self.oseoserver_subscriptionspecificationbatch_batches.get())
+            result = self.oseoserver_specificationbatches.get()
         except models.ObjectDoesNotExist:
             result = None
         return result
-    subscription_specification_batch = property(
-        _subscription_specification_batch)
+    specification_batch = property(_specification_batch)
 
     def create_oseo_order_monitor(
             self, presentation="brief"):
@@ -417,14 +419,73 @@ class Order(CustomizableItem):
                 raise NotImplementedError
         return om
 
-    def update_status(self):
-        try:
-            self.productorder.update_status()
-        except self.DoesNotExist:
-            self.derivedorder.update_sattus()
+    def update_status(self, new_status):
+        """Update the status of the order.
 
-    def __str__(self):
-        return '{}'.format(self.id)
+        In addition to the order's own status, the status of it's children
+        processing batches must also be updated.
+
+        Processing batches need a status because they are used for
+        notifying end users. Specification batches do not carry status
+        information and therefore need no updating.
+
+        Order status may be set by one of two methods:
+
+        1. The order's status is changed directly by an operator. This
+           status must be reflected in the order's batches. This may happen:
+
+           1.1. When the order is created. This creation process is comprised
+                of three stages:
+
+                1.1.1. Instantiation - The order is created with a status of
+                       SUBMITTED
+                1.1.2. Moderation - The status may change from SUBMITTED to
+                       either ACCEPTED or CANCELLED
+                1.1.3. Pre-execution - The status may change from ACCEPTED
+                       to either IN_PRODUCTION (for PRODUCT_ORDER and
+                       MASSIVE_ORDER) or SUSPENDED (for SUBSCRIPTION_ORDER)
+
+           1.2. When a SUBSCRIPTION_ORDER or MASSIVE_ORDER is CANCELLED by
+                the end user.
+
+           1.3. When a SUBSCRIPTION_ORDER is TERMINATED because it has expired
+
+        2. The order's status is automatically changed because the status of
+           its processing batches has also changed, in response to the
+           underlying order items being processed.
+
+           2.1. The status of a PRODUCT_ORDER might change from IN_PRODUCTION
+                to either COMPLETED or FAILED, according to the status in its
+                single processing batch
+
+           2.2. The status of a SUBSCRIPTION_ORDER might change from SUSPENDED
+                to IN_PRODUCTION and then back to SUSPENDED according to the
+                execution state of any of its processing batches.
+
+           2.3. The status of a MASSIVE_ORDER might change from IN_PRODUCTION
+                to either SUSPENDED (and then to IN_PRODUCTION again),
+                FAILED or COMPLETED
+
+        In this method we only handle the case described by 1.
+
+        """
+
+        if new_status != self.status:
+            if new_status in (self.SUBMITTED,
+                              self.ACCEPTED,
+                              self.CANCELLED,
+                              self.IN_PRODUCTION,
+                              self.SUSPENDED):
+                try:
+                    batch = self.processing_batches.get()
+                    batch.update_status(new_status)
+                except ProcessingBatch.DoesNotExist:
+                    pass
+                self.status = new_status
+                self.save()
+            else:
+                raise RuntimeError(
+                    "Cannot set {!r} directly on the order".format(new_status))
 
 
 @python_2_unicode_compatible
@@ -477,14 +538,14 @@ class OrderItem(CustomizableItem):
         help_text="URL where this item is available",
         blank=True
     )
-    product_order_batch = models.ForeignKey(
-        "ProductOrderBatch",
+    processing_batch = models.ForeignKey(
+        "ProcessingBatch",
         null=True,
         blank=True,
         related_name="order_items",
     )
-    subscription_specification_batch = models.ForeignKey(
-        "SubscriptionSpecificationBatch",
+    specification_batch = models.ForeignKey(
+        "SpecificationBatch",
         null=True,
         blank=True,
         related_name="order_items",
@@ -509,17 +570,35 @@ class OrderItem(CustomizableItem):
         help_text="Number of times this order item has been downloaded."
     )
 
+    def __str__(self):
+        return ("id: {0.id}, batch: {1}".format(self, self.get_batch()))
+
     def save(self, *args, **kwargs):
         """Save instance into the database.
 
         This method reimplements django's default model.save() behaviour in
-        order to update the item's batch's status (if there is a batch).
+        order to update the item's batch's status (if there is a batch and if
+        it is a processing batch).
+
         """
 
         super(OrderItem, self).save(*args, **kwargs)
         batch = self.get_batch()
-        if batch:
-            batch.update_status()
+        if isinstance(batch, ProcessingBatch):
+            item_statuses = set()
+            for item in batch.order_items():
+                item_statuses.add(item.status)
+            if self.IN_PRODUCTION in item_statuses:
+                batch.status = self.IN_PRODUCTION
+            elif self.FAILED in item_statuses:
+                batch.status = self.FAILED
+            elif len(item_statuses) == 1:
+                batch.status = item_statuses[0]
+            else:
+                raise RuntimeError(
+                    "Invalid item statuses: {}".format(item_statuses))
+            batch.save()
+
 
     def export_options(self):
         valid_options = dict()
@@ -582,8 +661,8 @@ class OrderItem(CustomizableItem):
         return sit
 
     def get_batch(self):
-        return (self.product_order_batch or
-                self.subscription_specification_batch or
+        return (self.processing_batch or
+                self.specification_batch or
                 self.subscription_processing_batch)
 
 
@@ -655,21 +734,6 @@ class OrderItem(CustomizableItem):
         expiry_date = now + dt.timedelta(
             days=generic_order_config.get("item_availability_days",1))
         return expiry_date
-
-    #def __str__(self):
-    #    batch = (self.product_order_batch or
-    #             self.subscription_specification_batch or
-    #             self.subscription_processing_batch)
-    #    try:
-    #        order = batch.order
-    #    except AttributeError:
-    #        order = None
-    #    return (
-    #        "{instance.__class__.__name__}(id={instance.id!r}, "
-    #        "batch={batch.id!r}, order={order.id!r}, "
-    #        "item_id={instancee.item_id!r}".format(
-    #        instance=self, batch=batch, order=order)
-    #    )
 
 
 @python_2_unicode_compatible
@@ -771,7 +835,7 @@ class Batch(models.Model):
         "Order",
         null=True,
         blank=True,
-        related_name="%(app_label)s_%(class)s_batches"
+        related_name="%(app_label)s_%(class)ses"
     )
     created_on = models.DateTimeField(auto_now_add=True)
     completed_on = models.DateTimeField(null=True, blank=True)
@@ -788,7 +852,7 @@ class Batch(models.Model):
         verbose_name_plural = "batches"
 
     def __str__(self):
-        return str("{}({})".format(self.__class__.__name__, self.id))
+        return "id: {0.id}, order: {0.order.id}".format(self)
 
     def update_status(self):
         """Update a batch's status
@@ -868,17 +932,79 @@ class Batch(models.Model):
 
 
 @python_2_unicode_compatible
-class ProductOrderBatch(Batch):
+class SpecificationBatch(Batch):
+    """A grouper for specification of item options for long running orders.
+
+    This type of batch is created for orders of type SUBSCRIPTION_ORDER and
+    MASSIVE_ORDER. It allows the saving of any options that may be specific
+    to a single collection that is being ordered.
+
+    When it is time to process new items, this batch is consulted in order to
+    determine what are the options to apply
+
+    """
     pass
 
 
 @python_2_unicode_compatible
-class SubscriptionSpecificationBatch(Batch):
-    pass
+class ProcessingBatch(Batch):
+    """A grouper for order items.
+
+    This type of batch is created for managing the processing of order items
+    of orders of type PRODUCT_ORDER and MASSIVE_ORDER.
+
+    """
+
+    def update_status(self, new_status):
+        """Manually update a batch's status.
+
+        This method updates the batch and its respective order items with
+        either an initial or final status.
+
+        """
+        if new_status in (CustomizableItem.SUBMITTED,
+                          CustomizableItem.ACCEPTED):
+            for item in self.order_items.all():
+                item.update_status(new_status)
+        else:
+            raise RuntimeError(
+                "Cannot manually update status of {} to {!r}. Status must "
+                "be set by the batch's order items".format(self, new_status))
+        self.status = new_status
+        self.save()
+
+    def save(self, *args, **kwargs):
+        """Reimplementing base class's save() in order to set status.
+
+        Status is set based upon the statuses of the batch's order items.
+
+        """
+
+        item_statuses = set()
+        for item in self.order_items.all():
+            item_statuses.add(item.status)
+        if CustomizableItem.IN_PRODUCTION in item_statuses:
+            self.status = CustomizableItem.IN_PRODUCTION
+        elif CustomizableItem.FAILED in item_statuses:
+            self.status = CustomizableItem.FAILED
+        elif len(item_statuses) == 1:
+            self.status = item_statuses[1]
+        else:
+            raise RuntimeError(
+                "Unexpected item statuses: {}".format(item_statuses))
+        now = dt.datetime.now(pytz.utc)
+        self.updated_on = now
+        if self.status in (CustomizableItem.COMPLETED,
+                           CustomizableItem.FAILED):
+            self.completed_on = now
+        super(ProcessingBatch, self).save(*args, **kwargs)
 
 
 @python_2_unicode_compatible
 class SubscriptionProcessingBatch(Batch):
+    """A grouper for the processing of order items in SUBSCRIPTION_ORDER types.
+    """
+
     timeslot = models.DateTimeField()
     collection = models.CharField(
         max_length=255,
@@ -900,4 +1026,3 @@ class SubscriptionProcessingBatch(Batch):
         item_processor = utilities.get_item_processor(item_specification)
         identifiers = item_processor.get_subscription_batch_identifiers(
             self.timeslot, self.collection)
-

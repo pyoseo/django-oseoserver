@@ -34,153 +34,173 @@ from ..models import SelectedDeliveryOption
 logger = logging.getLogger(__name__)
 
 
-@transaction.atomic
-def submit(request, user):
-    if request.statusNotification != Order.NONE:
-        raise NotImplementedError("Status notifications are not supported")
-    if request.orderSpecification:
-        response, order = process_request_order_specification(
-            request.orderSpecification, user, request.statusNotification)
+def check_collection_enabled(collection_id, order_type):
+    collection_settings = get_collection_settings(collection_id)
+    try:
+        enabled = collection_settings[order_type.lower()]["enabled"]
+    except KeyError:
+        enabled = False
+    if not enabled:
+        if order_type in (Order.PRODUCT_ORDER,
+                          Order.MASSIVE_ORDER):
+            raise errors.ProductOrderingNotSupportedError()
+        elif order_type == Order.SUBSCRIPTION_ORDER:
+            raise errors.SubscriptionNotSupportedError()
+        else:  # Order.TASKING_ORDER
+            raise errors.FutureProductNotSupportedError()
     else:
-        response, order = process_request_quotation_id()
-    return response, order
+        return collection_settings["name"]
 
 
-def process_request_quotation_id():
-    raise NotImplementedError
-
-
-def process_request_order_specification(order_specification, user,
-                                        status_notification):
-    """Process an order specification.
-
-    This function is responsible for parsing the input
-    ``order_order_specification`` into a database record and then returning an
-    OSEO response to signal that the request has been handled. Further order
-    processing is done elsewhere:
-
-    * Order dispatching code is in ``models.Order``
-    * Order processing code is in ``tasks.py``
+def create_delivery_option(oseo_delivery, collection, order_type):
+    """Parse delivery options into a django instance.
 
     Parameters
     ----------
-    order_specification: oseo.OrderSpecification
-        The specification for the order
-    user: django.contrib.auth.models.User
-        The django user instance associated with the order
-    status_notification: str
-        The order status notification
-
-    Returns
-    -------
-    oseo.Ack
-        Response to a successfull oseo:Submit order request
-    models.Order
-        The django instance of the newly created order
+    oseo_delivery: pyxb.bundles.opengis.raw.oseo_1_0.DeliveryOptionsType
+        The requested delivery options
+    collection:
 
     """
 
-    order_type = get_order_type(order_specification)
-    logger.debug("Processing specification for {0!r}".format(order_type))
-    check_order_type_enabled(order_type)
-    status, additional_status_info = get_order_initial_status(order_type)
-    logger.debug("Initial order status: {!r}".format(status))
-    order = models.Order(
-        status=status,
-        additional_status_info=additional_status_info,
-        mission_specific_status_info="",  # not implemented yet
-        remark=_c(order_specification.orderRemark),
-        user=user,
-        order_type=order_type,
-        reference=_c(order_specification.orderReference),
-        packaging=_c(order_specification.packaging),
-        priority=_c(order_specification.priority) or models.Order.STANDARD,
-        status_notification=status_notification
-    )
-    order.full_clean()
-    order.save()
-    logger.debug("Validated general order parameters")
-    if order_specification.deliveryInformation is not None:
-        order.delivery_information = create_order_delivery_information(
-            order_specification.deliveryInformation)
-    logger.debug("Extracted order delivery information")
-    if order_specification.invoiceAddress is not None:
-        order.invoice_address = create_order_invoice_address(
-            order_specification.invoiceAddress)
-    logger.debug("Extracted order invoice address")
-    for extension in order_specification.extension:
-        models.Extension.objects.create(order=order, text=extension)
-    logger.debug("Extracted order extensions")
-    item_processor = utilities.get_item_processor(order_type)
-    if order_type == models.Order.PRODUCT_ORDER:
-        batch = create_product_order_batch(
-            status, order_specification.orderItem, item_processor)
-        batch.order = order
-        batch.save()
-        requested_collections = batch.order_items.all().values_list(
-            "collection", flat=True).distinct()
-    elif order_type == models.Order.SUBSCRIPTION_ORDER:
-        raise NotImplementedError
+    if oseo_delivery.mediaDelivery is not None:
+        details = ", ".join((
+            oseo_delivery.mediaDelivery.packageMedium,
+            _c(oseo_delivery.mediaDelivery.shippingInstructions)
+        ))
+        delivery_type = models.SelectedDeliveryOption.MEDIA_DELIVERY
     else:
-        raise NotImplementedError
-    logger.debug("Created order item batches")
-    for collection in requested_collections:
-        if order_specification.deliveryOptions is not None:
-            delivery_option = create_delivery_option(
-                oseo_delivery=order_specification.deliveryOptions,
-                collection=collection,
-                order_type=order_type
-            )
-            delivery_option.save()
-            order.selected_delivery_option = delivery_option
-    logger.debug("Extracted order delivery options")
-    # order options are processed last because we need to know the order
-    # items first
-    for requested_option in order_specification.option:
-        values = requested_option.ParameterData.values
-        # since values is an xsd:anyType, we will not do schema
-        # validation on it
-        values_tree = etree.fromstring(values.toxml(ENCODING))
-        for element in values_tree:
-            for collection in requested_collections:
-                option = create_option(
-                    option_element=element,
-                    order_type=order_type,
-                    collection_name=collection,
-                    item_processor=item_processor
-                )
-                order.selected_options.add(option)
-                option.save()
-    logger.debug("Extracted order options")
-    order.full_clean()
-    order.save()
-    logger.debug("Saved order specification in the database")
-    # create oseo response and return it
-    response = oseo.SubmitAck(
-        status="success",
-        orderId=str(order.id),
-        orderReference=_n(order.reference)
+        if oseo_delivery.onlineDataAccess is not None:
+            details = oseo_delivery.onlineDataAccess.protocol
+        else:
+            details = oseo_delivery.onlineDataDelivery.protocol
+        delivery_type = (
+            models.SelectedDeliveryOption.ONLINE_DATA_ACCESS if
+            oseo_delivery.onlineDataAccess is not None else
+            models.SelectedDeliveryOption.ONLINE_DATA_DELIVERY
+        )
+        check_delivery_protocol(
+            protocol=details,
+            delivery_type=delivery_type,
+            order_type=order_type,
+            collection=collection
+        )
+    delivery_option = models.SelectedDeliveryOption(
+        delivery_type=delivery_type,
+        annotation=_c(oseo_delivery.productAnnotation),
+        copies=oseo_delivery.numberOfCopies or 1,
+        special_instructions=_c(oseo_delivery.specialInstructions),
+        delivery_details=details,
     )
-    return response, order
+    delivery_option.full_clean()
+    return delivery_option
 
 
-def create_order_invoice_address(invoice_address):
-    address_fields = _get_delivery_address(invoice_address)
-    invoice = models.InvoiceAddress(
-        first_name=address_fields["first_name"],
-        last_name =address_fields["last_name"],
-        company_ref =address_fields["company_ref"],
-        street_address =address_fields["postal_address"]["street_address"],
-        city=address_fields["postal_address"]["city"],
-        state=address_fields["postal_address"]["state"],
-        postal_code=address_fields["postal_address"]["postal_code"],
-        country=address_fields["postal_address"]["country"],
-        post_box=address_fields["postal_address"]["post_box"],
-        telephone=address_fields["telephone"],
-        fax=address_fields["fax"],
+def check_delivery_protocol(protocol, delivery_type, order_type, collection):
+    """Ensure the provided protocol is enabled in the settings.
+
+    Parameters
+    ----------
+    protocol: str
+        The delivery protocol being evaluated
+    delivery_type: str
+        The type of delivery being requested
+
+    """
+
+    collection_config = get_order_configuration(order_type, collection)
+    config_key = {
+        SelectedDeliveryOption.ONLINE_DATA_ACCESS: (
+            "online_data_access_options"),
+        SelectedDeliveryOption.ONLINE_DATA_DELIVERY: (
+            "online_data_delivery_options"),
+        SelectedDeliveryOption.MEDIA_DELIVERY: (
+            "media_delivery_options"),
+    }[delivery_type]
+    allowed_protocols = collection_config[config_key]
+    if protocol not in allowed_protocols:
+        raise errors.InvalidParameterValueError(locator="protocol")
+
+
+def check_order_type_enabled(order_type):
+    """Assert that the input order type is enabled in the settings
+
+    Parameters
+    ----------
+    order_type: oseoserver.constants.OrderType
+        Enumeration value
+
+    """
+
+    generic_config = utilities.get_generic_order_config(order_type)
+    if not generic_config.get("enabled", False):
+        logger.debug("Orders of type {0} are note enabled".format(order_type))
+        if order_type in (Order.PRODUCT_ORDER,
+                          Order.MASSIVE_ORDER):
+            raise errors.ProductOrderingNotSupportedError()
+        elif order_type == Order.SUBSCRIPTION_ORDER:
+            raise errors.SubscriptionNotSupportedError()
+        else:  # Order.TASKING_ORDER
+            raise errors.FutureProductNotSupportedError()
+
+
+def create_option(option_element, order_type, collection_name,
+                  customizable_item, item_processor):
+    """Create an option for an order or order item.
+
+    Parameters
+    ----------
+    option_element: lxml.etree._Element
+        The option to be parsed
+    order_type: str
+        Type of order being requested.
+    collection_name: str
+        Name of the collection being requested
+    customizable_item: models.Order or models.OrderItem
+        The type of model that is to have this option created for
+    item_processor:
+
+    """
+
+    option_name = etree.QName(option_element).localname
+    logger.debug("Validating option {!r}...".format(option_name))
+    # 1. can the option be used with current collection and order_type?
+    collection_config = get_order_configuration(order_type, collection_name)
+    if option_name not in collection_config.get("options", []):
+        raise errors.InvalidParameterValueError(
+            "option", value=option_name)
+    # 2. Parse the option value using the external item_processor
+    try:
+        parsed_value = item_processor.parse_option(option_name, option_element)
+    except AttributeError:
+        raise errors.OseoServerError(
+            "Incorrectly configured "
+            "item_processor: {}".format(item_processor)
+        )
+    except IndexError:
+        raise errors.InvalidParameterValueError(
+            locator="option", value=option_name)
+    # 3. is the parsed value legal?
+    for allowed_option in settings.get_processing_options():
+        if allowed_option["name"] == option_name:
+            choices = allowed_option.get("choices", [])
+            if parsed_value not in choices and len(choices) > 0:
+                raise errors.InvalidParameterValueError(
+                    "option", value=parsed_value)
+            break
+    else:
+        raise errors.InvalidParameterValueError(
+            "option", value=parsed_value)
+    OptionClass = (
+        models.SelectedOrderOption if isinstance(
+            customizable_item, models.Order) else models.SelectedItemOption
     )
-    invoice.full_clean()
-    return invoice
+    option = OptionClass(
+        option=option_name,
+        value=parsed_value
+    )
+    option.full_clean()
+    return option
 
 
 def create_order_delivery_information(delivery_information):
@@ -215,7 +235,7 @@ def create_order_delivery_information(delivery_information):
         post_box=address_fields.get("postal_address", {}).get("post_box", ""),
         telephone=address_fields.get("telephone", ""),
         fax=address_fields.get("fax", ""),
-        )
+    )
     info.full_clean()
     info.save()
     if len(delivery_information.onlineAddress) > 0:
@@ -233,201 +253,23 @@ def create_order_delivery_information(delivery_information):
     return info
 
 
-def check_order_type_enabled(order_type):
-    """Assert that the input order type is enabled in the settings
-
-    Parameters
-    ----------
-    order_type: oseoserver.constants.OrderType
-        Enumeration value
-
-    """
-
-    generic_config = utilities.get_generic_order_config(order_type)
-    if not generic_config.get("enabled", False):
-        logger.debug("Orders of type {0} are note enabled".format(order_type))
-        if order_type in (Order.PRODUCT_ORDER,
-                          Order.MASSIVE_ORDER):
-            raise errors.ProductOrderingNotSupportedError()
-        elif order_type == Order.SUBSCRIPTION_ORDER:
-            raise errors.SubscriptionNotSupportedError()
-        else:  # Order.TASKING_ORDER
-            raise errors.FutureProductNotSupportedError()
-
-
-def check_collection_enabled(collection_id, order_type):
-    collection_settings = get_collection_settings(collection_id)
-    try:
-        enabled = collection_settings[order_type.lower()]["enabled"]
-    except KeyError:
-        enabled = False
-    if not enabled:
-        if order_type in (Order.PRODUCT_ORDER,
-                          Order.MASSIVE_ORDER):
-            raise errors.ProductOrderingNotSupportedError()
-        elif order_type == Order.SUBSCRIPTION_ORDER:
-            raise errors.SubscriptionNotSupportedError()
-        else:  # Order.TASKING_ORDER
-            raise errors.FutureProductNotSupportedError()
-    else:
-        return collection_settings["name"]
-
-
-def get_collection_settings(collection_id):
-    for collection_config in settings.get_collections():
-        if collection_config["collection_identifier"] == collection_id:
-            result = collection_config
-            break
-    else:
-        raise errors.OseoServerError(
-            "Invalid collection identifier: {!r}".format(collection_id))
-    return result
-
-
-def create_product_order_batch(initial_status, order_items, item_processor):
-    """Create an order batch for product orders
-
-    Parameters
-    ----------
-    initial_status: str
-        Status for the batch
-    order_items: list
-        An iterable with oseo.CommonOrderItemType instances that are to be
-        turned into order items for the batch
-    item_processor:
-
-    """
-
-    batch = models.ProductOrderBatch(status=initial_status)
-    batch.full_clean()
-    batch.save()
-    item_status, item_additional_status_info = get_order_item_initial_status(
-        Order.PRODUCT_ORDER)
-    for oseo_item in order_items:
-        item = create_product_order_item(
-            item=oseo_item,
-            status=item_status,
-            item_processor=item_processor,
-            additional_status=item_additional_status_info
-        )
-        batch.order_items.add(item)
-        batch.save()
-    return batch
-
-
-def create_subscription_order_batch(order, collection, timeslot):
-    raise NotImplementedError
-
-
-def create_product_order_item(item, status, item_processor,
-                              additional_status=""):
-    """Create an order item for product orders
-
-    Parameters
-    ----------
-    item: oseo.CommonOrderItemType
-        The requested item specification
-    status: str
-        Initial status for the order item
-    item_processor: oseoserver.itemprocessor
-        The custom item_processor class used to process order items
-    additional_status: str, optional
-        Additional status information
-
-    """
-
-    collection_id = (
-        item.productId.collectionId or
-        item_processor.get_collection_id(item.productId.identifier)
+def create_order_invoice_address(invoice_address):
+    address_fields = _get_delivery_address(invoice_address)
+    invoice = models.InvoiceAddress(
+        first_name=address_fields["first_name"],
+        last_name =address_fields["last_name"],
+        company_ref =address_fields["company_ref"],
+        street_address =address_fields["postal_address"]["street_address"],
+        city=address_fields["postal_address"]["city"],
+        state=address_fields["postal_address"]["state"],
+        postal_code=address_fields["postal_address"]["postal_code"],
+        country=address_fields["postal_address"]["country"],
+        post_box=address_fields["postal_address"]["post_box"],
+        telephone=address_fields["telephone"],
+        fax=address_fields["fax"],
     )
-    collection_name = check_collection_enabled(collection_id,
-                                               Order.PRODUCT_ORDER)
-    order_item = models.OrderItem(
-        status=status,
-        additional_status_info=additional_status,
-        remark=_c(item.orderItemRemark),
-        collection=collection_name,
-        identifier=_c(item.productId.identifier),
-        item_id=item.itemId
-    )
-    order_item.full_clean()
-    order_item.save()
-    for requested_option in item.option:
-        values = requested_option.ParameterData.values
-        # since values is an xsd:anyType, we will not do schema
-        # validation on it
-        values_tree = etree.fromstring(values.toxml(ENCODING))
-        for element in values_tree:
-            option = create_option(element, Order.PRODUCT_ORDER,
-                                   collection_name, item_processor)
-            order_item.selected_options.add(option)
-            option.save()
-    if item.deliveryOptions is not None:
-        item_delivery = create_delivery_option(
-            oseo_delivery=item.deliveryOptions,
-            collection=collection_name,
-            order_type=Order.PRODUCT_ORDER
-        )
-        order_item.selected_delivery_option = item_delivery
-        item_delivery.save()
-    # scene selection options are not implemented yet
-    # payment is not implemented yet
-    # add extensions?
-    order_item.save()
-    return order_item
-
-
-def create_option(option_element, order_type, collection_name,
-                  item_processor):
-    """Create an option for an order or order item
-
-    Parameters
-    ----------
-    option_element: lxml.etree._Element
-        The option to be parsed
-    order_type: str
-        Type of order being requested.
-    collection_name: str
-        Name of the collection being requested
-    item_processor:
-
-    """
-
-    option_name = etree.QName(option_element).localname
-    logger.debug("Validating option {!r}...".format(option_name))
-    # 1. can the option be used with current collection and order_type?
-    collection_config = get_order_configuration(order_type, collection_name)
-    if option_name not in collection_config.get("options", []):
-        raise errors.InvalidParameterValueError(
-            "option", value=option_name)
-    # 2. Parse the option value using the external item_processor
-    try:
-        parsed_value = item_processor.parse_option(option_name, option_element)
-    except AttributeError:
-        raise errors.OseoServerError(
-            "Incorrectly configured "
-            "item_processor: {}".format(item_processor)
-        )
-    except IndexError:
-        raise errors.InvalidParameterValueError(
-            locator="option", value=option_name)
-    # 3. is the parsed value legal?
-    for allowed_option in settings.get_processing_options():
-        if allowed_option["name"] == option_name:
-            choices = allowed_option.get("choices", [])
-            if parsed_value not in choices and len(choices) > 0:
-                raise errors.InvalidParameterValueError(
-                    "option", value=parsed_value)
-            break
-    else:
-        raise errors.InvalidParameterValueError(
-            "option", value=parsed_value)
-    option = models.SelectedOption(
-        option=option_name,
-        value=parsed_value
-    )
-    option.full_clean()
-    return option
+    invoice.full_clean()
+    return invoice
 
 
 def create_order_item(status, item_id, collection,
@@ -499,74 +341,114 @@ def create_order_item(status, item_id, collection,
     return item
 
 
-def check_delivery_protocol(protocol, delivery_type, order_type, collection):
-    """Ensure the provided protocol is enabled in the settings.
+def create_processing_batch(initial_status, order_items, order_type,
+                            item_processor):
+    """Create an order batch for processing items.
 
     Parameters
     ----------
-    protocol: str
-        The delivery protocol being evaluated
-    delivery_type: str
-        The type of delivery being requested
+    initial_status: str
+        Status for the batch
+    order_items: list
+        An iterable with oseo.CommonOrderItemType instances that are to be
+        turned into order items for the batch
+    item_processor:
 
     """
 
-    collection_config = get_order_configuration(order_type, collection)
-    config_key = {
-        SelectedDeliveryOption.ONLINE_DATA_ACCESS: (
-            "online_data_access_options"),
-        SelectedDeliveryOption.ONLINE_DATA_DELIVERY: (
-            "online_data_delivery_options"),
-        SelectedDeliveryOption.MEDIA_DELIVERY: (
-            "media_delivery_options"),
-    }[delivery_type]
-    allowed_protocols = collection_config[config_key]
-    if protocol not in allowed_protocols:
-        raise errors.InvalidParameterValueError(locator="protocol")
+    batch = models.ProcessingBatch(status=initial_status)
+    batch.full_clean()
+    batch.save()
+    item_status, item_additional_status_info = get_order_item_initial_status(
+        order_type)
+    for oseo_item in order_items:
+        item = create_product_order_item(
+            item=oseo_item,
+            status=item_status,
+            item_processor=item_processor,
+            additional_status=item_additional_status_info
+        )
+        batch.order_items.add(item)
+        batch.save()
+    return batch
 
 
-def create_delivery_option(oseo_delivery, collection, order_type):
-    """Parse delivery options into a django instance.
+def create_product_order_item(item, status, item_processor,
+                              additional_status=""):
+    """Create an order item for product orders
 
     Parameters
     ----------
-    oseo_delivery: pyxb.bundles.opengis.raw.oseo_1_0.DeliveryOptionsType
-        The requested delivery options
-    collection:
+    item: oseo.CommonOrderItemType
+        The requested item specification
+    status: str
+        Initial status for the order item
+    item_processor: oseoserver.itemprocessor
+        The custom item_processor class used to process order items
+    additional_status: str, optional
+        Additional status information
 
     """
 
-    if oseo_delivery.mediaDelivery is not None:
-        details = ", ".join((
-            oseo_delivery.mediaDelivery.packageMedium,
-            _c(oseo_delivery.mediaDelivery.shippingInstructions)
-        ))
-        delivery_type = models.SelectedDeliveryOption.MEDIA_DELIVERY
-    else:
-        if oseo_delivery.onlineDataAccess is not None:
-            details = oseo_delivery.onlineDataAccess.protocol
-        else:
-            details = oseo_delivery.onlineDataDelivery.protocol
-        delivery_type = (
-            models.SelectedDeliveryOption.ONLINE_DATA_ACCESS if
-            oseo_delivery.onlineDataAccess is not None else
-            models.SelectedDeliveryOption.ONLINE_DATA_DELIVERY
-        )
-        check_delivery_protocol(
-            protocol=details,
-            delivery_type=delivery_type,
-            order_type=order_type,
-            collection=collection
-        )
-    delivery_option = models.SelectedDeliveryOption(
-        delivery_type=delivery_type,
-        annotation=_c(oseo_delivery.productAnnotation),
-        copies=oseo_delivery.numberOfCopies or 1,
-        special_instructions=_c(oseo_delivery.specialInstructions),
-        delivery_details=details,
+    collection_id = (
+        item.productId.collectionId or
+        item_processor.get_collection_id(item.productId.identifier)
     )
-    delivery_option.full_clean()
-    return delivery_option
+    collection_name = check_collection_enabled(collection_id,
+                                               Order.PRODUCT_ORDER)
+    order_item = models.OrderItem(
+        status=status,
+        additional_status_info=additional_status,
+        remark=_c(item.orderItemRemark),
+        collection=collection_name,
+        identifier=_c(item.productId.identifier),
+        item_id=item.itemId
+    )
+    order_item.full_clean()
+    order_item.save()
+    for requested_option in item.option:
+        values = requested_option.ParameterData.values
+        # since values is an xsd:anyType, we will not do schema
+        # validation on it
+        values_tree = etree.fromstring(values.toxml(ENCODING))
+        for element in values_tree:
+            option = create_option(
+                option_element=element,
+                order_type=Order.PRODUCT_ORDER,
+                collection_name=collection_name,
+                customizable_item=order_item,
+                item_processor=item_processor
+            )
+            order_item.selected_options.add(option)
+            option.save()
+    if item.deliveryOptions is not None:
+        item_delivery = create_delivery_option(
+            oseo_delivery=item.deliveryOptions,
+            collection=collection_name,
+            order_type=Order.PRODUCT_ORDER
+        )
+        order_item.selected_delivery_option = item_delivery
+        item_delivery.save()
+    # scene selection options are not implemented yet
+    # payment is not implemented yet
+    # add extensions?
+    order_item.save()
+    return order_item
+
+
+def create_subscription_order_batch(order, collection, timeslot):
+    raise NotImplementedError
+
+
+def get_collection_settings(collection_id):
+    for collection_config in settings.get_collections():
+        if collection_config["collection_identifier"] == collection_id:
+            result = collection_config
+            break
+    else:
+        raise errors.OseoServerError(
+            "Invalid collection identifier: {!r}".format(collection_id))
+    return result
 
 
 def get_order_initial_status(order_type):
@@ -586,36 +468,6 @@ def get_order_item_initial_status(order_type):
     }.get(initial_status,
           "The Order has been rejected, item won't be processed")
     return initial_status, additional_status_info
-
-
-def get_order_type(order_specification):
-    """Return the order type for the input order specification.
-
-    Usually the order type can be extracted directly from the order
-    specification, as the OSEO standard defines only PRODUCT ORDER,
-    SUBSCRIPTION ORDER and TASKING ORDER. We are adding a fourth type,
-    MASSIVE ORDER, which is based on the existence of a special reference
-    on orders of type PRODUCT ORDER.
-
-    Parameters
-    ----------
-    order_specification: oseo.Submit
-        the submitted request
-
-    Returns
-    -------
-    str
-        The requested order type
-
-    """
-
-    # no need to validate value of orderType because pyxb has already done that
-    order_type = order_specification.orderType
-    if order_type == Order.PRODUCT_ORDER:
-        reference = _c(order_specification.orderReference)
-        if reference == Order.MASSIVE_ORDER_REFERENCE:
-            order_type = Order.MASSIVE_ORDER
-    return order_type
 
 
 def get_order_configuration(order_type, collection):
@@ -654,6 +506,171 @@ def get_order_configuration(order_type, collection):
             raise errors.OseoServerError(
                 "Unable to get order configuration")
     return result
+
+
+def get_order_type(order_specification):
+    """Return the order type for the input order specification.
+
+    Usually the order type can be extracted directly from the order
+    specification, as the OSEO standard defines only PRODUCT ORDER,
+    SUBSCRIPTION ORDER and TASKING ORDER. We are adding a fourth type,
+    MASSIVE ORDER, which is based on the existence of a special reference
+    on orders of type PRODUCT ORDER.
+
+    Parameters
+    ----------
+    order_specification: oseo.Submit
+        the submitted request
+
+    Returns
+    -------
+    str
+        The requested order type
+
+    """
+
+    # no need to validate value of orderType because pyxb has already done that
+    order_type = order_specification.orderType
+    if order_type == Order.PRODUCT_ORDER:
+        reference = _c(order_specification.orderReference)
+        if reference == Order.MASSIVE_ORDER_REFERENCE:
+            order_type = Order.MASSIVE_ORDER
+    return order_type
+
+
+def process_request_order_specification(order_specification, user,
+                                        status_notification):
+    """Process an order specification.
+
+    This function is responsible for parsing the input
+    ``order_order_specification`` into a database record and then returning an
+    OSEO response to signal that the request has been handled. Further order
+    processing is done elsewhere:
+
+    * Order dispatching code is in ``models.Order``
+    * Order processing code is in ``tasks.py``
+
+    Parameters
+    ----------
+    order_specification: oseo.OrderSpecification
+        The specification for the order
+    user: django.contrib.auth.models.User
+        The django user instance associated with the order
+    status_notification: str
+        The order status notification
+
+    Returns
+    -------
+    oseo.Ack
+        Response to a successfull oseo:Submit order request
+    models.Order
+        The django instance of the newly created order
+
+    """
+
+    order_type = get_order_type(order_specification)
+    logger.debug("Processing specification for {0!r}".format(order_type))
+    check_order_type_enabled(order_type)
+    status, additional_status_info = get_order_initial_status(order_type)
+    logger.debug("Initial order status: {!r}".format(status))
+    order = models.Order(
+        status=status,
+        additional_status_info=additional_status_info,
+        mission_specific_status_info="",  # not implemented yet
+        remark=_c(order_specification.orderRemark),
+        user=user,
+        order_type=order_type,
+        reference=_c(order_specification.orderReference),
+        packaging=_c(order_specification.packaging),
+        priority=_c(order_specification.priority) or models.Order.STANDARD,
+        status_notification=status_notification
+    )
+    order.full_clean()
+    order.save()
+    logger.debug("Validated general order parameters")
+    if order_specification.deliveryInformation is not None:
+        order.delivery_information = create_order_delivery_information(
+            order_specification.deliveryInformation)
+    logger.debug("Extracted order delivery information")
+    if order_specification.invoiceAddress is not None:
+        order.invoice_address = create_order_invoice_address(
+            order_specification.invoiceAddress)
+    logger.debug("Extracted order invoice address")
+    for extension in order_specification.extension:
+        models.Extension.objects.create(order=order, text=extension)
+    logger.debug("Extracted order extensions")
+    item_processor = utilities.get_item_processor(order_type)
+    if order_type == models.Order.PRODUCT_ORDER:
+        batch = create_processing_batch(
+            initial_status=status,
+            order_items=order_specification.orderItem,
+            order_type=order_type,
+            item_processor=item_processor
+        )
+        batch.order = order
+        batch.save()
+        requested_collections = batch.order_items.all().values_list(
+            "collection", flat=True).distinct()
+    elif order_type == models.Order.SUBSCRIPTION_ORDER:
+        raise NotImplementedError
+    else:
+        raise NotImplementedError
+    logger.debug("Created order item batches")
+    for collection in requested_collections:
+        if order_specification.deliveryOptions is not None:
+            delivery_option = create_delivery_option(
+                oseo_delivery=order_specification.deliveryOptions,
+                collection=collection,
+                order_type=order_type
+            )
+            delivery_option.save()
+            order.selected_delivery_option = delivery_option
+    logger.debug("Extracted order delivery options")
+    # order options are processed last because we need to know the order
+    # items first
+    for requested_option in order_specification.option:
+        values = requested_option.ParameterData.values
+        # since values is an xsd:anyType, we will not do schema
+        # validation on it
+        values_tree = etree.fromstring(values.toxml(ENCODING))
+        for element in values_tree:
+            for collection in requested_collections:
+                option = create_option(
+                    option_element=element,
+                    order_type=order_type,
+                    collection_name=collection,
+                    customizable_item=order,
+                    item_processor=item_processor
+                )
+                order.selected_options.add(option)
+                option.save()
+    logger.debug("Extracted order options")
+    order.full_clean()
+    order.save()
+    logger.debug("Saved order specification in the database")
+    # create oseo response and return it
+    response = oseo.SubmitAck(
+        status="success",
+        orderId=str(order.id),
+        orderReference=_n(order.reference)
+    )
+    return response, order
+
+
+def process_request_quotation_id():
+    raise NotImplementedError
+
+
+@transaction.atomic
+def submit(request, user):
+    if request.statusNotification != Order.NONE:
+        raise NotImplementedError("Status notifications are not supported")
+    if request.orderSpecification:
+        response, order = process_request_order_specification(
+            request.orderSpecification, user, request.statusNotification)
+    else:
+        response, order = process_request_quotation_id()
+    return response, order
 
 
 def _get_delivery_address(delivery_address_type):
