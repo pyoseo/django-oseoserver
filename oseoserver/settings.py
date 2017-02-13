@@ -26,7 +26,7 @@ def get_product_order():
         {
             "enabled": False,
             "automatic_approval": False,
-            "notify_creation": True,
+            "notify_moderation": True,
             "item_processor": "oseoserver.orderpreparation."
                               "exampleorderprocessor.ExampleOrderProcessor",
             "item_availability_days": 10,
@@ -40,7 +40,7 @@ def get_subscription_order():
         {
             "enabled": False,
             "automatic_approval": False,
-            "notify_creation": True,
+            "notify_moderation": True,
             "item_processor": "oseoserver.orderpreparation."
                               "exampleorderprocessor.ExampleOrderProcessor",
             "item_availability_days": 10,
@@ -54,7 +54,7 @@ def get_tasking_order():
         {
             "enabled": False,
             "automatic_approval": False,
-            "notify_creation": True,
+            "notify_moderation": True,
             "item_processor": "oseoserver.orderpreparation."
                               "exampleorderprocessor.ExampleOrderProcessor",
             "item_availability_days": 10,
@@ -68,7 +68,7 @@ def get_massive_order():
         {
             "enabled": False,
             "automatic_approval": False,
-            "notify_creation": True,
+            "notify_moderation": True,
             "item_processor": "oseoserver.orderpreparation."
                               "exampleorderprocessor.ExampleOrderProcessor",
             "item_availability_days": 10,

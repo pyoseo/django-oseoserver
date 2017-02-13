@@ -1,4 +1,4 @@
-# Copyright 2014 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -117,7 +117,7 @@ def check_delivery_protocol(protocol, delivery_type, order_type, collection):
         SelectedDeliveryOption.MEDIA_DELIVERY: (
             "media_delivery_options"),
     }[delivery_type]
-    allowed_protocols = collection_config[config_key]
+    allowed_protocols = collection_config[order_type.lower()][config_key]
     if protocol not in allowed_protocols:
         raise errors.InvalidParameterValueError(locator="protocol")
 
@@ -142,6 +142,62 @@ def check_order_type_enabled(order_type):
             raise errors.SubscriptionNotSupportedError()
         else:  # Order.TASKING_ORDER
             raise errors.FutureProductNotSupportedError()
+
+
+def create_item_specification(item, item_processor, order_type):
+    """Create an order item specification.
+
+    Parameters
+    ----------
+    item: pyxb.bundles.opengis.oseo_1_0.CommonOrderItemType
+        The requested item specification
+    item_processor: oseoserver.itemprocessor
+        The custom item_processor class used to process order items
+
+    """
+
+    collection_id = (
+        item.productId.collectionId or
+        item_processor.get_collection_id(item.productId.identifier)
+    )
+    collection_name = check_collection_enabled(
+        collection_id, order_type=order_type)
+    item_specification = models.ItemSpecification(
+        remark=_c(item.orderItemRemark),
+        collection=collection_name,
+        identifier=_c(item.productId.identifier),
+        item_id=item.itemId
+    )
+    item_specification.full_clean()
+    item_specification.save()
+    for requested_option in item.option:
+        values = requested_option.ParameterData.values
+        # since values is an xsd:anyType, we will not do schema
+        # validation on it
+        values_tree = etree.fromstring(values.toxml(ENCODING))
+        for element in values_tree:
+            option = create_option(
+                option_element=element,
+                order_type=Order.PRODUCT_ORDER,
+                collection_name=collection_name,
+                customizable_item=item_specification,
+                item_processor=item_processor
+            )
+            item_specification.selected_options.add(option)
+            option.save()
+    if item.deliveryOptions is not None:
+        item_delivery = create_delivery_option(
+            oseo_delivery=item.deliveryOptions,
+            collection=collection_name,
+            order_type=Order.PRODUCT_ORDER
+        )
+        item_specification.selected_delivery_option = item_delivery
+        item_delivery.save()
+    # scene selection options are not implemented yet
+    # payment is not implemented yet
+    # add extensions?
+    item_specification.save()
+    return item_specification
 
 
 def create_option(option_element, order_type, collection_name,
@@ -373,67 +429,67 @@ def create_processing_batch(initial_status, order_items, order_type,
     return batch
 
 
-def create_product_order_item(item, status, item_processor,
-                              additional_status=""):
-    """Create an order item for product orders
-
-    Parameters
-    ----------
-    item: oseo.CommonOrderItemType
-        The requested item specification
-    status: str
-        Initial status for the order item
-    item_processor: oseoserver.itemprocessor
-        The custom item_processor class used to process order items
-    additional_status: str, optional
-        Additional status information
-
-    """
-
-    collection_id = (
-        item.productId.collectionId or
-        item_processor.get_collection_id(item.productId.identifier)
-    )
-    collection_name = check_collection_enabled(collection_id,
-                                               Order.PRODUCT_ORDER)
-    order_item = models.OrderItem(
-        status=status,
-        additional_status_info=additional_status,
-        remark=_c(item.orderItemRemark),
-        collection=collection_name,
-        identifier=_c(item.productId.identifier),
-        item_id=item.itemId
-    )
-    order_item.full_clean()
-    order_item.save()
-    for requested_option in item.option:
-        values = requested_option.ParameterData.values
-        # since values is an xsd:anyType, we will not do schema
-        # validation on it
-        values_tree = etree.fromstring(values.toxml(ENCODING))
-        for element in values_tree:
-            option = create_option(
-                option_element=element,
-                order_type=Order.PRODUCT_ORDER,
-                collection_name=collection_name,
-                customizable_item=order_item,
-                item_processor=item_processor
-            )
-            order_item.selected_options.add(option)
-            option.save()
-    if item.deliveryOptions is not None:
-        item_delivery = create_delivery_option(
-            oseo_delivery=item.deliveryOptions,
-            collection=collection_name,
-            order_type=Order.PRODUCT_ORDER
-        )
-        order_item.selected_delivery_option = item_delivery
-        item_delivery.save()
-    # scene selection options are not implemented yet
-    # payment is not implemented yet
-    # add extensions?
-    order_item.save()
-    return order_item
+# def create_product_order_item(item, status, item_processor,
+#                               additional_status=""):
+#     """Create an order item for product orders
+#
+#     Parameters
+#     ----------
+#     item: oseo.CommonOrderItemType
+#         The requested item specification
+#     status: str
+#         Initial status for the order item
+#     item_processor: oseoserver.itemprocessor
+#         The custom item_processor class used to process order items
+#     additional_status: str, optional
+#         Additional status information
+#
+#     """
+#
+#     collection_id = (
+#         item.productId.collectionId or
+#         item_processor.get_collection_id(item.productId.identifier)
+#     )
+#     collection_name = check_collection_enabled(collection_id,
+#                                                Order.PRODUCT_ORDER)
+#     order_item = models.OrderItem(
+#         status=status,
+#         additional_status_info=additional_status,
+#         remark=_c(item.orderItemRemark),
+#         collection=collection_name,
+#         identifier=_c(item.productId.identifier),
+#         item_id=item.itemId
+#     )
+#     order_item.full_clean()
+#     order_item.save()
+#     for requested_option in item.option:
+#         values = requested_option.ParameterData.values
+#         # since values is an xsd:anyType, we will not do schema
+#         # validation on it
+#         values_tree = etree.fromstring(values.toxml(ENCODING))
+#         for element in values_tree:
+#             option = create_option(
+#                 option_element=element,
+#                 order_type=Order.PRODUCT_ORDER,
+#                 collection_name=collection_name,
+#                 customizable_item=order_item,
+#                 item_processor=item_processor
+#             )
+#             order_item.selected_options.add(option)
+#             option.save()
+#     if item.deliveryOptions is not None:
+#         item_delivery = create_delivery_option(
+#             oseo_delivery=item.deliveryOptions,
+#             collection=collection_name,
+#             order_type=Order.PRODUCT_ORDER
+#         )
+#         order_item.selected_delivery_option = item_delivery
+#         item_delivery.save()
+#     # scene selection options are not implemented yet
+#     # payment is not implemented yet
+#     # add extensions?
+#     order_item.save()
+#     return order_item
 
 
 def create_subscription_order_batch(order, collection, timeslot):
@@ -571,11 +627,9 @@ def process_request_order_specification(order_specification, user,
     order_type = get_order_type(order_specification)
     logger.debug("Processing specification for {0!r}".format(order_type))
     check_order_type_enabled(order_type)
-    status, additional_status_info = get_order_initial_status(order_type)
-    logger.debug("Initial order status: {!r}".format(status))
     order = models.Order(
-        status=status,
-        additional_status_info=additional_status_info,
+        status=Order.SUBMITTED,
+        additional_status_info="Order is awaiting approval",
         mission_specific_status_info="",  # not implemented yet
         remark=_c(order_specification.orderRemark),
         user=user,
@@ -600,22 +654,16 @@ def process_request_order_specification(order_specification, user,
         models.Extension.objects.create(order=order, text=extension)
     logger.debug("Extracted order extensions")
     item_processor = utilities.get_item_processor(order_type)
-    if order_type == models.Order.PRODUCT_ORDER:
-        batch = create_processing_batch(
-            initial_status=status,
-            order_items=order_specification.orderItem,
-            order_type=order_type,
-            item_processor=item_processor
+    requested_collections = set()
+    for oseo_item in order_specification.orderItem:
+        item_specification = create_item_specification(
+            item=oseo_item,
+            item_processor=item_processor,
+            order_type=order_type
         )
-        batch.order = order
-        batch.save()
-        requested_collections = batch.order_items.all().values_list(
-            "collection", flat=True).distinct()
-    elif order_type == models.Order.SUBSCRIPTION_ORDER:
-        raise NotImplementedError
-    else:
-        raise NotImplementedError
-    logger.debug("Created order item batches")
+        order.item_specifications.add(item_specification)
+        requested_collections.add(item_specification.collection)
+    logger.debug("Created order item specifications")
     for collection in requested_collections:
         if order_specification.deliveryOptions is not None:
             delivery_option = create_delivery_option(
@@ -663,6 +711,24 @@ def process_request_quotation_id():
 
 @transaction.atomic
 def submit(request, user):
+    """OSEO Submit handler.
+
+    Parameters
+    ----------
+    request: pyxb.bundles.opengis.oseo_1_0.Submit
+        The request to process
+    user: django.contrib.auth.models.User
+        USer that has placed the request
+
+    Returns
+    -------
+    response: pyxb.bundles.opengis.oseo_1_0.SubmitAck
+        OSEO response to be sent to the client
+    order: models.Order
+        Order instance
+
+    """
+
     if request.statusNotification != Order.NONE:
         raise NotImplementedError("Status notifications are not supported")
     if request.orderSpecification:

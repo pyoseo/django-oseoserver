@@ -66,76 +66,130 @@ from .constants import ENCODING
 logger = logging.getLogger(__name__)
 
 
-def moderate_order(order, approved, rejection_details=None, send_email=True):
-    """Act upon the order after it has been moderated by an admin.
+def moderate_order(order):
+    """Moderate a newly placed order.
 
-    The OSEO standard does not really define any moderation workflow
-    for orders. As such, none of the defined statuses fits exactly with
-    this process. We are abusing the CANCELLED status for this.
+    Orders may be moderated:
+
+    - Automatically, when the configuration of the order type has the
+      ``automatic_approval`` parameter set to ``True``.
+
+    - Manually
 
     Parameters
     ----------
-    order: oseoserver.models.Order
-        The order that has been moderated
-    approved: bool
-        The moderation result
-    rejection_details: str, optional
-        Any additional details explaining why the order has been rejected
+    order: models.Order
+        The order object to be moderated
 
     """
 
-    if send_email:
-        mail_recipients = get_user_model().objects.filter(
-            Q(oseoserver_order_orders__id=order.id) | Q(is_staff=True)
-        ).exclude(email="").distinct("email")
-    else:
-        mail_recipients = None
-    if order.order_type == Order.PRODUCT_ORDER:
-        _moderate_product_order(
+    config = utilities.get_generic_order_config(order.order_type)
+    if config["automatic_approval"]:
+        result = handle_submit_order(
             order=order,
-            approved=approved,
-            rejection_details=rejection_details,
-            mail_recipients=mail_recipients
-        )
-    elif order.order_type == Order.SUBSCRIPTION_ORDER:
-        _moderate_subscription_order(
-            order=order,
-            approved=approved,
-            rejection_details=rejection_details,
-            mail_recipients=mail_recipients
+            approved=True,
+            notify=config["notify_moderation"]
         )
     else:
-        raise NotImplementedError
-    logger.debug("Order {0!r} has been {1}".format(order.id, order.status))
+        mailsender.send_moderation_request_email(
+            order_type=order.order_type)
+        result = None  # admin will moderate the order later
+    return result
 
 
-def _moderate_product_order(order, approved, rejection_details=None,
-                           mail_recipients=None):
+def handle_submit(order, approved, notify=False):
     if approved:
-        order.status = CustomizableItem.ACCEPTED
+        order.status = Order.ACCEPTED
         order.additional_status_info = (
             "Order has been approved and is waiting in the "
             "processing queue for an available slot"
         )
-        order.save()
-        logger.debug("Dispatching order...")
-        batch = order.regular_batches.get()  # productorder has only one batch
-        order.dispatch(batch)
+        handler = {
+            Order.PRODUCT_ORDER: handle_product_order,
+            Order.MASSIVE_ORDER: handle_massive_order,
+            Order.SUBSCRIPTION_ORDER: handle_subscription_order,
+            Order.TASKING_ORDER: handle_tasking_order,
+        }[order.order_type]
+        handler(order)
     else:
         order.status = CustomizableItem.CANCELLED
-        order.additional_status_info = rejection_details or (
+        order.additional_status_info = (
             "Order request has been rejected by the administrators")
     order.save()
-    if mail_recipients is not None:
-        mailsender.send_product_order_moderated_email(
+    if notify:
+        mail_recipients = get_user_model().objects.filter(
+            Q(oseoserver_order_orders__id=order.id) | Q(is_staff=True)
+        ).exclude(email="").distinct("email")
+        mail_func = {
+            Order.PRODUCT_ORDER: mailsender.send_product_order_moderated_email,
+            Order.SUBSCRIPTION_ORDER: (
+                mailsender.send_subscription_moderated_email)
+        }[order.order_type]
+        mail_func(
             order=order,
             approved=approved,
             recipients=mail_recipients
         )
+    return approved
 
 
-def _moderate_subscription_order(order, approved, rejection_details=None,
-                                 mail_recipients=None):
+def handle_product_order(order):
+    """Handle an already accepted product order.
+
+    The handling process consists in creating an appropriate batch for the
+    order and placing the batch in the processing queue.
+
+    Parameters
+    ----------
+    order: models.Order
+        Product order to be handled
+
+    """
+
+    batch = create_product_order_batch(order)
+    batch.order = order
+    order.status = CustomizableItem.IN_PRODUCTION
+    order.additional_status_info = "Order is being processed"
+    order.save()
+    batch.dispatch()
+
+
+def handle_massive_order(order):
+    batch = create_massive_order_batch(order, batch_index=0)
+    batch.order = order
+    order.status = CustomizableItem.IN_PRODUCTION
+    order.additional_status_info = "Order is being processed"
+    order.save()
+    batch.dispatch()
+
+
+def handle_subscription_order(order):
+    order.status = Order.SUSPENDED
+    order.additional_status_info = ("Subscription is active. New batches "
+                                    "will be processed when requested.")
+    order.save()
+
+
+def handle_tasking_order(order):
+    order.status = Order.SUSPENDED
+    order.additional_status_info = ("Tasking order is active. It will be "
+                                    "processed when appropriate.")
+    order.save()
+
+
+def create_product_order_batch(order):
+    raise NotImplementedError
+
+
+def create_massive_order_batch(order, batch_index=0):
+    raise NotImplementedError
+
+
+def create_subscription_batch(order, timeslot, collection):
+    raise NotImplementedError
+
+
+def create_tasking_order_batch():
     raise NotImplementedError
 
 
@@ -194,19 +248,7 @@ class OseoServer(object):
         result = operation(schema_instance, user)
         if op_name == "Submit":
             response, order = result
-            if order.status == CustomizableItem.SUBMITTED:
-                logger.debug(
-                    "Order {0!r} is {1}, sending moderation email to "
-                    "admins".format(order.id, order.status)
-                )
-                mailsender.send_moderation_request_email(
-                    order.order_type, order.id)
-            elif order.status == CustomizableItem.ACCEPTED:
-                if order.order_type == Order.PRODUCT_ORDER:
-                    moderate_order(order, approved=True, send_email=False)
-            else:  # if order is not accepted or submitted we probably
-                   # should raise an error
-                pass
+            moderate_order(order)
         else:
             response = result
         response_element = etree.fromstring(response.toxml(

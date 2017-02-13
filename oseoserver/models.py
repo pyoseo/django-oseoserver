@@ -14,8 +14,6 @@
 
 """Database models for oseoserver."""
 
-# TODO - Investigate whether some model methods may be tunred into mixins or helper functions to promote code reuse
-
 from __future__ import absolute_import
 import datetime as dt
 from decimal import Decimal
@@ -506,17 +504,27 @@ class OrderPendingModeration(Order):
         verbose_name_plural = "orders pending moderation"
 
 
-@python_2_unicode_compatible
-class OrderItem(CustomizableItem):
+class ItemSpecification(models.Model):
+    """Specification from which actual order items are generated at runtime."""
+    order = models.ForeignKey(
+        "Order",
+        related_name="item_specifications",
+        null=True,
+        blank=True,
+    )
+    remark = models.TextField(
+        help_text="Some specific remark about the item",
+        blank=True
+    )
     extension = models.ForeignKey(
         "Extension",
-        related_name="order_item",
+        related_name="item_specifications",
         null=True,
         blank=True
     )
     selected_delivery_option = models.OneToOneField(
         'SelectedDeliveryOption',
-        related_name='order_item',
+        related_name='item_specification',
         blank=True,
         null=True
     )
@@ -526,32 +534,35 @@ class OrderItem(CustomizableItem):
     identifier = models.CharField(
         max_length=255,
         blank=True,
-        help_text="identifier for this order item. It is the product Id in "
-                  "the catalog"
+        help_text="identifier for the order item. It is the product Id in "
+                  "the catalogue."
     )
     item_id = models.CharField(
         max_length=80,
         help_text="Id for the item in the order request"
+    )
+
+
+@python_2_unicode_compatible
+class OrderItem(CustomizableItem):
+    identifier = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="identifier for this order item. It is the product Id in "
+                  "the catalog"
     )
     url = models.CharField(
         max_length=255,
         help_text="URL where this item is available",
         blank=True
     )
-    processing_batch = models.ForeignKey(
-        "ProcessingBatch",
-        null=True,
-        blank=True,
+    item_specification = models.ForeignKey(
+        "ItemSpecification",
         related_name="order_items",
+        null=True
     )
-    specification_batch = models.ForeignKey(
-        "SpecificationBatch",
-        null=True,
-        blank=True,
-        related_name="order_items",
-    )
-    subscription_processing_batch = models.ForeignKey(
-        "SubscriptionProcessingBatch",
+    batch = models.ForeignKey(
+        "Batch",
         null=True,
         blank=True,
         related_name="order_items",
@@ -660,12 +671,6 @@ class OrderItem(CustomizableItem):
             _n(self.mission_specific_status_info)
         return sit
 
-    def get_batch(self):
-        return (self.processing_batch or
-                self.specification_batch or
-                self.subscription_processing_batch)
-
-
     def process(self):
         """Process the item
 
@@ -740,8 +745,8 @@ class OrderItem(CustomizableItem):
 class SelectedItemOption(models.Model):
     option = models.CharField(max_length=255)
     value = models.CharField(max_length=255, help_text='Value for this option')
-    item = models.ForeignKey(
-        "OrderItem",
+    item_specification = models.ForeignKey(
+        "ItemSpecification",
         related_name="selected_options",
         null=True,
         blank=True
@@ -768,8 +773,8 @@ class SelectedOrderOption(models.Model):
 
 @python_2_unicode_compatible
 class SelectedPaymentOption(models.Model):
-    order_item = models.ForeignKey(
-        'OrderItem',
+    item_specification = models.OneToOneField(
+        'ItemSpecification',
         related_name='selected_payment_option',
     )
     option = models.CharField(max_length=255)
@@ -780,8 +785,8 @@ class SelectedPaymentOption(models.Model):
 
 @python_2_unicode_compatible
 class SelectedSceneSelectionOption(models.Model):
-    order_item = models.ForeignKey(
-        'OrderItem',
+    item_specification = models.ForeignKey(
+        'ItemSpecification',
         related_name='selected_scene_selection_options'
     )
     option = models.CharField(max_length=255)
@@ -792,6 +797,7 @@ class SelectedSceneSelectionOption(models.Model):
         return self.value
 
 
+@python_2_unicode_compatible
 class SelectedDeliveryOption(models.Model):
     MEDIA_DELIVERY = "mediadelivery"
     ONLINE_DATA_ACCESS = "onlinedataaccess"
@@ -835,7 +841,7 @@ class Batch(models.Model):
         "Order",
         null=True,
         blank=True,
-        related_name="%(app_label)s_%(class)ses"
+        related_name="batches"
     )
     created_on = models.DateTimeField(auto_now_add=True)
     completed_on = models.DateTimeField(null=True, blank=True)
@@ -844,11 +850,10 @@ class Batch(models.Model):
         max_length=50,
         choices=CustomizableItem.STATUS_CHOICES,
         default=CustomizableItem.SUBMITTED,
-        help_text="initial status"
+        help_text="processing status"
     )
 
     class Meta:
-        abstract = True
         verbose_name_plural = "batches"
 
     def __str__(self):
@@ -928,101 +933,3 @@ class Batch(models.Model):
             else:  # lets get each file that is complete
                 completed = batch_complete_items
         return completed
-
-
-
-@python_2_unicode_compatible
-class SpecificationBatch(Batch):
-    """A grouper for specification of item options for long running orders.
-
-    This type of batch is created for orders of type SUBSCRIPTION_ORDER and
-    MASSIVE_ORDER. It allows the saving of any options that may be specific
-    to a single collection that is being ordered.
-
-    When it is time to process new items, this batch is consulted in order to
-    determine what are the options to apply
-
-    """
-    pass
-
-
-@python_2_unicode_compatible
-class ProcessingBatch(Batch):
-    """A grouper for order items.
-
-    This type of batch is created for managing the processing of order items
-    of orders of type PRODUCT_ORDER and MASSIVE_ORDER.
-
-    """
-
-    def update_status(self, new_status):
-        """Manually update a batch's status.
-
-        This method updates the batch and its respective order items with
-        either an initial or final status.
-
-        """
-        if new_status in (CustomizableItem.SUBMITTED,
-                          CustomizableItem.ACCEPTED):
-            for item in self.order_items.all():
-                item.update_status(new_status)
-        else:
-            raise RuntimeError(
-                "Cannot manually update status of {} to {!r}. Status must "
-                "be set by the batch's order items".format(self, new_status))
-        self.status = new_status
-        self.save()
-
-    def save(self, *args, **kwargs):
-        """Reimplementing base class's save() in order to set status.
-
-        Status is set based upon the statuses of the batch's order items.
-
-        """
-
-        item_statuses = set()
-        for item in self.order_items.all():
-            item_statuses.add(item.status)
-        if CustomizableItem.IN_PRODUCTION in item_statuses:
-            self.status = CustomizableItem.IN_PRODUCTION
-        elif CustomizableItem.FAILED in item_statuses:
-            self.status = CustomizableItem.FAILED
-        elif len(item_statuses) == 1:
-            self.status = item_statuses[1]
-        else:
-            raise RuntimeError(
-                "Unexpected item statuses: {}".format(item_statuses))
-        now = dt.datetime.now(pytz.utc)
-        self.updated_on = now
-        if self.status in (CustomizableItem.COMPLETED,
-                           CustomizableItem.FAILED):
-            self.completed_on = now
-        super(ProcessingBatch, self).save(*args, **kwargs)
-
-
-@python_2_unicode_compatible
-class SubscriptionProcessingBatch(Batch):
-    """A grouper for the processing of order items in SUBSCRIPTION_ORDER types.
-    """
-
-    timeslot = models.DateTimeField()
-    collection = models.CharField(
-        max_length=255,
-        choices=[
-            (col["name"], col["name"]) for col in settings.get_collections()]
-    )
-
-    class Meta:
-        verbose_name_plural = "subscription batches"
-
-    def __str__(self):
-        return str("{}({})".format(self.__class__.__name__, self.id))
-
-    def save(self, *args, **kwargs):
-        order_specification_batch = self.order.batches.first()
-        item_specification = order_specification_batch.order_items.get(
-            collection=self.collection)
-        requested_options = item_specification.export_options()
-        item_processor = utilities.get_item_processor(item_specification)
-        identifiers = item_processor.get_subscription_batch_identifiers(
-            self.timeslot, self.collection)

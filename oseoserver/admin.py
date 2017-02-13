@@ -6,6 +6,7 @@ from django.utils.html import format_html
 
 from . import models
 from . import server
+from . import utilities
 
 
 class SelectedPaymentOptionInline(admin.StackedInline):
@@ -18,8 +19,22 @@ class SelectedSceneSelectionOptionInline(admin.StackedInline):
     extra = 1
 
 
+class SelectedOrderOptionInline(admin.StackedInline):
+    model = models.SelectedOrderOption
+    extra = 1
+
+
+class ItemSpecificationInline(admin.StackedInline):
+    model = models.ItemSpecification
+    extra = 1
+
+
 @admin.register(models.Order)
 class OrderAdmin(admin.ModelAdmin):
+    inlines = (
+        SelectedOrderOptionInline,
+        ItemSpecificationInline,
+    )
     fieldsets = (
         (None, {
             "fields": (
@@ -33,7 +48,7 @@ class OrderAdmin(admin.ModelAdmin):
                 "priority",
                 "packaging",
                 "extensions",
-                "selected_options",
+                #"selected_options",
             )
         }),
         ("Further info", {
@@ -58,6 +73,8 @@ class OrderAdmin(admin.ModelAdmin):
         "order_type",
     )
     readonly_fields = (
+        "order_type",
+        "status",
         "status_changed_on",
         "completed_on",
         "last_describe_result_access_request",
@@ -88,32 +105,39 @@ class PendingOrderAdmin(admin.ModelAdmin):
 
     def approve_order(self, request, queryset):
         for order in queryset:
-            server.moderate_order(order, True)
+            config = utilities.get_generic_order_config(order.order_type)
+            server.handle_submit(
+                order=order,
+                approved=True,
+                notify=config["notify_moderation"]
+            )
     approve_order.short_description = "Approve selected orders"
 
     def reject_order(self, request, queryset):
         for order in queryset:
-            server.moderate_order(order, False)
+            config = utilities.get_generic_order_config(order.order_type)
+            server.handle_submit(
+                order=order,
+                approved=False,
+                notify=config["notify_moderation"]
+            )
     reject_order.short_description = "Reject selected orders"
 
 
 @admin.register(models.OrderItem)
 class OrderItemAdmin(admin.ModelAdmin):
-    inlines = (
-        SelectedPaymentOptionInline,
-        SelectedSceneSelectionOptionInline,
-    )
     fieldsets = (
         (None, {
             "fields": (
-                "item_id",
+                "identifier",
+                "collection",
                 "batch",
+                "order",
+                "item_specification",
                 "status",
                 "available",
                 "status_changed_on",
                 "completed_on",
-                "identifier",
-                "collection",
             )
         }),
         ("Further info", {
@@ -123,7 +147,6 @@ class OrderItemAdmin(admin.ModelAdmin):
                 "downloads",
                 "last_downloaded_at",
                 "url",
-                "remark",
                 "additional_status_info",
                 "mission_specific_status_info",
             )
@@ -132,7 +155,6 @@ class OrderItemAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "available",
-        "item_id",
         "link_to_batch",
         "link_to_order",
         "identifier",
@@ -144,7 +166,6 @@ class OrderItemAdmin(admin.ModelAdmin):
     )
     search_fields = (
         "batch__order__id",
-        "item_id",
         "identifier",
     )
     date_hierarchy = "status_changed_on"
@@ -152,6 +173,8 @@ class OrderItemAdmin(admin.ModelAdmin):
         "status_changed_on",
         "completed_on",
         "available",
+        "batch",
+        "item_specification",
     )
 
     def link_to_batch(self, obj):

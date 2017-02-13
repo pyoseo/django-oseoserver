@@ -260,9 +260,10 @@ def test_create_option():
             option_element=option_el,
             order_type="phony",
             collection_name="fake",
+            customizable_item=models.Order(),
             item_processor=mock_processor
         )
-        assert isinstance(result, models.SelectedOption)
+        assert isinstance(result, models.SelectedOrderOption)
         assert result.option == option_name
         assert result.value == option_value
 
