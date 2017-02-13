@@ -1,4 +1,4 @@
-# Copyright 2015 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -43,13 +43,14 @@ that preform each OSEO operation.
 #  pd.toxml()
 
 from __future__ import absolute_import
-from datetime import datetime
+import datetime as dt
 import importlib
 import logging
 
 from django.db.models import Q
 from django.contrib.auth import get_user_model
 from lxml import etree
+import pytz
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows as ows_bindings
 import pyxb
@@ -137,7 +138,7 @@ def handle_product_order(order):
     """Handle an already accepted product order.
 
     The handling process consists in creating an appropriate batch for the
-    order and placing the batch in the processing queue.
+    order, updating the status and placing the batch in the processing queue.
 
     Parameters
     ----------
@@ -146,15 +147,22 @@ def handle_product_order(order):
 
     """
 
-    batch = create_product_order_batch(order)
-    batch.order = order
     order.status = CustomizableItem.IN_PRODUCTION
     order.additional_status_info = "Order is being processed"
+    batch = create_product_order_batch(order)
     order.save()
     batch.dispatch()
 
 
 def handle_massive_order(order):
+    """Handle an already accepted massive order.
+
+    The handling process consists in creating the first batch of the massive
+    order, updating the status accordingly and send the batch to the processing
+    queue.
+
+    """
+
     batch = create_massive_order_batch(order, batch_index=0)
     batch.order = order
     order.status = CustomizableItem.IN_PRODUCTION
@@ -164,6 +172,14 @@ def handle_massive_order(order):
 
 
 def handle_subscription_order(order):
+    """Handle an already accepted subscription order.
+
+    The handling process consists in changing the status of the order so that
+    it reflects its waiting procedure. Subscription orders are processed on
+    demand and they're batches are only created when necessary.
+
+    """
+
     order.status = Order.SUSPENDED
     order.additional_status_info = ("Subscription is active. New batches "
                                     "will be processed when requested.")
@@ -178,11 +194,47 @@ def handle_tasking_order(order):
 
 
 def create_product_order_batch(order):
-    raise NotImplementedError
+    batch = models.Batch(
+        order=order,
+        status=order.status
+    )
+    batch.full_clean()
+    batch.save()
+    for item_specification in order.item_specifications.all():
+        order_item = models.OrderItem(
+            item_specification=item_specification,
+            batch=batch,
+            identifier=item_specification.identifier,
+        )
+        order_item.full_clean()
+        order_item.save()
+    return batch
 
 
+# TODO - untested code!
 def create_massive_order_batch(order, batch_index=0):
-    raise NotImplementedError
+    config = utilities.get_generic_order_config(order.order_type)
+    processor = utilities.import_class(config["item_processor"])
+    order_total_items = processor.estimate_number_massive_order_items(order)
+    order_total_batches = processor.estimate_number_massive_order_batches(
+        order)
+    batch_item_identifiers = processor.get_batch_item_identifiers(
+        batch_number=batch_index)
+    batch = models.Batch(
+        order=order,
+        status=order.status
+    )
+    batch.full_clean()
+    batch.save()
+    for (item_identifier, item_specification) in batch_item_identifiers:
+        order_item = models.OrderItem(
+            item_specification=item_specification,
+            batch=batch,
+            identifier=item_identifier,
+        )
+        order_item.full_clean()
+        order_item.save()
+    return batch
 
 
 def create_subscription_batch(order, timeslot, collection):
@@ -353,7 +405,7 @@ class OseoServer(object):
         else:
             for order_item in batch.order_items.all():
                 order_item.files.all().delete()
-            batch.updated_on = datetime.utcnow()
+            batch.updated_on = dt.datetime.now(pytz..utc)
             batch.save()
 
         notify_user = False
