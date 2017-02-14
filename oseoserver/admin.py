@@ -5,7 +5,7 @@ from django.core.urlresolvers import reverse
 from django.utils.html import format_html
 
 from . import models
-from . import server
+from . import requestprocessor
 from . import utilities
 
 
@@ -106,7 +106,7 @@ class PendingOrderAdmin(admin.ModelAdmin):
     def approve_order(self, request, queryset):
         for order in queryset:
             config = utilities.get_generic_order_config(order.order_type)
-            server.handle_submit(
+            requestprocessor.handle_submit(
                 order=order,
                 approved=True,
                 notify=config["notify_moderation"]
@@ -116,7 +116,7 @@ class PendingOrderAdmin(admin.ModelAdmin):
     def reject_order(self, request, queryset):
         for order in queryset:
             config = utilities.get_generic_order_config(order.order_type)
-            server.handle_submit(
+            requestprocessor.handle_submit(
                 order=order,
                 approved=False,
                 notify=config["notify_moderation"]

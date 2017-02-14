@@ -21,7 +21,7 @@ from tastypie import fields
 from tastypie.constants import ALL, ALL_WITH_RELATIONS
 
 from oseoserver import models
-import oseoserver.server
+import oseoserver.requestprocessor
 
 
 class UserResource(ModelResource):
@@ -116,7 +116,7 @@ class SubscriptionBatchResource(ModelResource):
         order = order_resource.get_via_uri(order_uri, request=bundle.request)
         timeslot = datetime.strptime(bundle.data["timeslot"],
                                      "%Y-%m-%dT%H:%M:%S")
-        s = oseoserver.server.OseoServer()
+        s = oseoserver.requestprocessor.OseoServer()
         s.process_subscription_orders(timeslot, collections=[collection.name],
                                       order_id=order.id)
 

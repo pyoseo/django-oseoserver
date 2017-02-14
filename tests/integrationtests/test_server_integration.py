@@ -7,7 +7,7 @@ from pyxb.bundles.opengis import oseo_1_0 as oseo
 import pyxb.binding.datatypes as xsd
 from pyxb import BIND
 
-from oseoserver.server import OseoServer
+from oseoserver.requestprocessor import OseoServer
 from oseoserver import errors
 from oseoserver import constants
 from oseoserver import models

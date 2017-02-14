@@ -399,36 +399,36 @@ def create_order_item(status, item_id, collection,
     return item
 
 
-def create_processing_batch(initial_status, order_items, order_type,
-                            item_processor):
-    """Create an order batch for processing items.
-
-    Parameters
-    ----------
-    initial_status: str
-        Status for the batch
-    order_items: list
-        An iterable with oseo.CommonOrderItemType instances that are to be
-        turned into order items for the batch
-    item_processor:
-
-    """
-
-    batch = models.ProcessingBatch(status=initial_status)
-    batch.full_clean()
-    batch.save()
-    item_status, item_additional_status_info = get_order_item_initial_status(
-        order_type)
-    for oseo_item in order_items:
-        item = create_product_order_item(
-            item=oseo_item,
-            status=item_status,
-            item_processor=item_processor,
-            additional_status=item_additional_status_info
-        )
-        batch.order_items.add(item)
-        batch.save()
-    return batch
+# def create_processing_batch(initial_status, order_items, order_type,
+#                             item_processor):
+#     """Create an order batch for processing items.
+#
+#     Parameters
+#     ----------
+#     initial_status: str
+#         Status for the batch
+#     order_items: list
+#         An iterable with oseo.CommonOrderItemType instances that are to be
+#         turned into order items for the batch
+#     item_processor:
+#
+#     """
+#
+#     batch = models.ProcessingBatch(status=initial_status)
+#     batch.full_clean()
+#     batch.save()
+#     item_status, item_additional_status_info = get_order_item_initial_status(
+#         order_type)
+#     for oseo_item in order_items:
+#         item = create_product_order_item(
+#             item=oseo_item,
+#             status=item_status,
+#             item_processor=item_processor,
+#             additional_status=item_additional_status_info
+#         )
+#         batch.order_items.add(item)
+#         batch.save()
+#     return batch
 
 
 # def create_product_order_item(item, status, item_processor,
@@ -697,6 +697,8 @@ def process_request_order_specification(order_specification, user,
                 option.save()
     logger.debug("Extracted order options")
     order.full_clean()
+    validate_order_size(order, item_processor)
+    logger.debug("Validated order size")
     order.save()
     logger.debug("Saved order specification in the database")
     # create oseo response and return it
@@ -742,6 +744,16 @@ def submit(request, user):
     return response, order
 
 
+def validate_order_size(order, item_processor):
+    total_item_count = _get_order_total_item_count(order, item_processor)
+    _validate_order_number_of_items(total_item_count)
+    _validate_active_order_items(
+        order_type=order.order_type,
+        order_items=total_item_count,
+        user=order.user
+    )
+
+
 def _get_delivery_address(delivery_address_type):
     address = {
         "first_name": _c(delivery_address_type.firstName),
@@ -785,3 +797,38 @@ def _get_initial_status(order_type):
     else:
         status = CustomizableItem.CANCELLED
     return status
+
+
+def _get_order_total_item_count(order, item_processor):
+    if order.order_type in (Order.PRODUCT_ORDER, Order.SUBSCRIPTION_ORDER):
+        item_count = len(order.item_specifications.all())
+    elif order.order_type == Order.MASSIVE_ORDER:
+        item_count = item_processor.estimate_number_massive_order_items(order)
+    else:
+        raise NotImplementedError
+    return item_count
+
+
+def _validate_active_order_items(order_type, order_items, user):
+    MAXIMUM_ACTIVE_ITEMS = settings.get_max_active_items()
+    user_items = models.OrderItem.objects.filter(
+        batch__order__user=user
+    ).filter(status=CustomizableItem.IN_PRODUCTION).count()
+    if (user_items + order_items) > MAXIMUM_ACTIVE_ITEMS:
+        error_msg = (
+            "User {0.username!r} has too many active order items. Refusing "
+            "to accept order at this moment. Try again later".format(user))
+        logger.error(error_msg)
+        raise errors.NoApplicableCodeError()
+
+
+def _validate_order_number_of_items(order_items):
+    MAX_ORDER_ITEMS = settings.get_max_order_items()
+    if order_items > MAX_ORDER_ITEMS:
+        error_msg = (
+            "Each order may not request a number of individual items greater "
+            "than {}. Either split the request into smaller orders or perform "
+            "an order of type {!r}.".format(
+                MAX_ORDER_ITEMS, Order.MASSIVE_ORDER)
+        )
+        raise errors.NoApplicableCodeError

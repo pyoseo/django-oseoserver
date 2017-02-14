@@ -6,7 +6,7 @@ from lxml import etree
 
 from oseoserver import constants
 from oseoserver import errors
-from oseoserver.server import OseoServer
+from oseoserver.requestprocessor import OseoServer
 from pyxb.bundles.opengis import oseo_1_0 as oseo
 
 pytestmark = pytest.mark.unit

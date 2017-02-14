@@ -24,7 +24,7 @@ from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows_2_0 as ows
 
-from .. import server
+from .. import requestprocessor
 from .. import settings
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def get_capabilities(request, user):
 
     # parse the GetCapabilities request
     # here we just provide a standard response
-    caps = oseo.Capabilities(version=server.OseoServer.OSEO_VERSION)
+    caps = oseo.Capabilities(version=requestprocessor.OseoServer.OSEO_VERSION)
     caps.ServiceIdentification = build_service_identification()
     caps.ServiceProvider = build_service_provider()
     caps.OperationsMetadata = build_operations_metadata()
@@ -72,7 +72,7 @@ def build_service_provider():
 
 def build_operations_metadata():
     op_meta = ows.OperationsMetadata()
-    for op_name in server.OseoServer.OPERATION_CALLABLES.keys():
+    for op_name in requestprocessor.OseoServer.OPERATION_CALLABLES.keys():
         op = ows.Operation(name=op_name)
         op.DCP.append(BIND())
         op.DCP[0].HTTP = BIND()
