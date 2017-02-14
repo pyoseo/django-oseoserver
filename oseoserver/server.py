@@ -304,7 +304,7 @@ class OseoServer(object):
         else:
             response = result
         response_element = etree.fromstring(response.toxml(
-            encoding=ENCODING))
+            encoding=ENCODING), parser=utilities.get_etree_parser())
         return response_element
 
     def create_exception_report(self, code, text, locator=None):
@@ -335,7 +335,9 @@ class OseoServer(object):
             version=self.OSEO_VERSION)
         exception_report.append(exception)
         result = etree.fromstring(
-            exception_report.toxml(encoding=ENCODING))
+            exception_report.toxml(encoding=ENCODING),
+            parser=utilities.get_etree_parser()
+        )
         return result
 
     def parse_xml(self, xml):

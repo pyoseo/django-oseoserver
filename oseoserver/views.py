@@ -11,6 +11,7 @@ from .constants import ENCODING
 from . import errors
 from . import soap
 from .server import OseoServer
+from .utilities import get_etree_parser
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ def oseo_endpoint(request):
     soap_fault_code = None
     server = OseoServer()
     try:
-        request_element = etree.fromstring(request.body)
+        request_element = etree.fromstring(
+            request.body, parser=get_etree_parser())
         soap_version = soap.get_soap_version(request_element)
         request_data = soap.unwrap_request(request_element)[0]
         logger.debug("user: {}".format(request.user))

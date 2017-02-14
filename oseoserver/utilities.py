@@ -19,6 +19,8 @@ Some utility functions for pyoseo
 import importlib
 import logging
 
+
+from lxml import etree
 #from celery.utils import mail
 #from pygments import highlight
 #from pygments.lexers import PythonLexer
@@ -28,6 +30,17 @@ from . import settings
 from . import errors
 
 logger = logging.getLogger(__name__)
+
+
+def get_etree_parser():
+    return etree.XMLParser(
+        encoding="utf-8",
+        resolve_entities=False,
+        strip_cdata=True,
+        dtd_validation=False,
+        load_dtd=False,
+        no_network=True
+    )
 
 
 def import_class(python_path, *instance_args, **instance_kwargs):

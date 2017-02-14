@@ -26,6 +26,7 @@ from .. import errors
 from .. import utilities
 from .. import settings
 from ..utilities import _n, _c
+from ..utilities import get_etree_parser
 from ..constants import ENCODING
 from ..models import CustomizableItem
 from ..models import Order
@@ -174,7 +175,8 @@ def create_item_specification(item, item_processor, order_type):
         values = requested_option.ParameterData.values
         # since values is an xsd:anyType, we will not do schema
         # validation on it
-        values_tree = etree.fromstring(values.toxml(ENCODING))
+        values_tree = etree.fromstring(
+            values.toxml(ENCODING), parser=get_etree_parser())
         for element in values_tree:
             option = create_option(
                 option_element=element,
@@ -680,7 +682,8 @@ def process_request_order_specification(order_specification, user,
         values = requested_option.ParameterData.values
         # since values is an xsd:anyType, we will not do schema
         # validation on it
-        values_tree = etree.fromstring(values.toxml(ENCODING))
+        values_tree = etree.fromstring(
+            values.toxml(ENCODING), parser=get_etree_parser())
         for element in values_tree:
             for collection in requested_collections:
                 option = create_option(
