@@ -760,33 +760,6 @@ class Batch(models.Model):
         super(Batch, self).save(*args, **kwargs)
         self.update_order_status()
 
-    def _get_massive_order_status(self):
-        existing_batch_statuses = self.order.batches.values_list(
-            "status", flat=True).distinct()
-        if CustomizableItem.IN_PRODUCTION in existing_batch_statuses:
-            new_status = CustomizableItem.IN_PRODUCTION
-        else:  # check if we need to create any more batches
-            config = utilities.get_generic_order_config(self.order.order_type)
-            processor = utilities.import_class(config["item_processor"])
-            total_batches = processor.estimate_number_massive_order_batches(
-                self.order)
-            if len(self.order.batches.count()) == total_batches:
-                logger.debug("All batches have been created")
-                if CustomizableItem.FAILED in existing_batch_statuses:
-                    new_status = CustomizableItem.FAILED
-                else:
-                    new_status = CustomizableItem.COMPLETED
-            else:
-                new_status = CustomizableItem.SUSPENDED
-        return new_status
-
-    def _get_subscription_order_status(self):
-        if self.status == CustomizableItem.IN_PRODUCTION:
-            new_status = CustomizableItem.IN_PRODUCTION
-        else:
-            new_status = CustomizableItem.SUSPENDED
-        return new_status
-
     def update_order_status(self):
         if self.order.order_type == Order.PRODUCT_ORDER:
             new_status = self.status
@@ -801,6 +774,7 @@ class Batch(models.Model):
             now = dt.datetime.now(pytz.utc)
             self.order.status_changed_on = now
             self.order.status = new_status
+            self.order.additional_status_info = ""
             if new_status in (CustomizableItem.COMPLETED,
                               CustomizableItem.FAILED):
                 self.order.completed_on = now
@@ -846,3 +820,31 @@ class Batch(models.Model):
             else:  # lets get each file that is complete
                 completed = batch_complete_items
         return completed
+
+    def _get_massive_order_status(self):
+        existing_batch_statuses = self.order.batches.values_list(
+            "status", flat=True).distinct()
+        if CustomizableItem.IN_PRODUCTION in existing_batch_statuses:
+            new_status = CustomizableItem.IN_PRODUCTION
+        else:  # check if we need to create any more batches
+            config = utilities.get_generic_order_config(self.order.order_type)
+            processor = utilities.import_class(config["item_processor"])
+            total_batches = processor.estimate_number_massive_order_batches(
+                self.order)
+            if len(self.order.batches.count()) == total_batches:
+                logger.debug("All batches have been created")
+                if CustomizableItem.FAILED in existing_batch_statuses:
+                    new_status = CustomizableItem.FAILED
+                else:
+                    new_status = CustomizableItem.COMPLETED
+            else:
+                new_status = CustomizableItem.SUSPENDED
+        return new_status
+
+    def _get_subscription_order_status(self):
+        if self.status == CustomizableItem.IN_PRODUCTION:
+            new_status = CustomizableItem.IN_PRODUCTION
+        else:
+            new_status = CustomizableItem.SUSPENDED
+        return new_status
+
