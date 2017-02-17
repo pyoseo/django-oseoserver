@@ -45,6 +45,7 @@ result, status_code, response_headers = s.process_request(request)
 from __future__ import absolute_import
 import importlib
 import logging
+from itertools import product
 
 import celery
 from django.db.models import Q
@@ -113,23 +114,26 @@ def create_exception_report(code, text, locator=None):
     return result
 
 
-# TODO - untested code!
 @transaction.atomic()
 def create_massive_order_batch(order, batch_index=0):
-    config = utilities.get_generic_order_config(order.order_type)
-    processor = utilities.import_class(config["item_processor"])
-    order_total_items = processor.estimate_number_massive_order_items(order)
-    order_total_batches = processor.estimate_number_massive_order_batches(
-        order)
-    batch_item_identifiers = processor.get_batch_item_identifiers(
-        batch_number=batch_index)
+    processor = utilities.get_item_processor(order.order_type)
+    all_identifiers = []
+    for item_specification in order.item_specifications.all():
+        start, end = processor.get_order_duration(item_specification)
+        identifiers = processor.get_massive_order_batch_item_identifiers(
+            batch_index=batch_index,
+            collection=item_specification.collection,
+            start=start,
+            end=end
+        )
+        all_identifiers.extend(product([item_specification], identifiers))
     batch = models.Batch(
         order=order,
         status=order.status
     )
     batch.full_clean()
     batch.save()
-    for (item_identifier, item_specification) in batch_item_identifiers:
+    for (item_specification, item_identifier) in all_identifiers:
         order_item = models.OrderItem(
             item_specification=item_specification,
             batch=batch,
@@ -172,10 +176,10 @@ def create_subscription_batch(order, timeslot, collection):
     )
     batch.full_clean()
     batch.save()
-    config = utilities.get_generic_order_config(order.order_type)
-    processor = utilities.import_class(config["item_processor"])
+    processor = utilities.get_item_processor(order.order_type)
     for item_spec in order.item_specifications.filter(collection=collection):
-        identifier = processor.get_item_identifier(timeslot, collection)
+        identifier = processor.get_subscription_item_identifier(
+            timeslot, collection)
         order_item = models.OrderItem(
             item_specification=item_spec,
             batch=batch,
@@ -231,7 +235,8 @@ def handle_massive_order(order):
     batch = create_massive_order_batch(order, batch_index=0)
     batch.order = order
     order.save()
-    batch.dispatch()
+    celery.current_app.send_task(
+        "oseoserver.tasks.process_batch", (batch.id,))
 
 
 def handle_product_order(order):
@@ -342,7 +347,9 @@ def moderate_order(order):
         logger.debug("Orders of type {!r} have to be manually approved by an "
                      "admin".format(order.order_type))
         mailsender.send_moderation_request_email(
-            order_type=order.order_type)
+            order_type=order.order_type,
+            order_id=order.id
+        )
         result = False
     return result
 

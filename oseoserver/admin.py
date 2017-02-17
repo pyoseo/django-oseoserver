@@ -9,6 +9,30 @@ from . import requestprocessor
 from . import utilities
 
 
+def order_change_form_link(instance):
+    change_form_url = reverse("admin:oseoserver_order_change",
+                              args=(instance.id,))
+    return format_html('<a href="{}">{}</a>', change_form_url, instance.id)
+order_change_form_link.short_description = "Order"
+
+
+def delivery_information_change_form_link(instance):
+    if instance.id is not None:
+        change_form_url = reverse(
+            "admin:oseoserver_deliveryinformation_change", args=(instance.id,))
+        result = format_html(
+            '<a href="{}">{}</a>', change_form_url, instance.id)
+    else:
+        result = "Order does not specify any delivery information"
+    return result
+delivery_information_change_form_link.short_description = "Details"
+
+
+class OnlineAddressInline(admin.StackedInline):
+    model = models.OnlineAddress
+    extra = 1
+
+
 class SelectedPaymentOptionInline(admin.StackedInline):
     model = models.SelectedPaymentOption
     extra = 1
@@ -24,6 +48,23 @@ class SelectedOrderOptionInline(admin.StackedInline):
     extra = 1
 
 
+class SelectedDeliveryOptionInline(admin.StackedInline):
+    model = models.SelectedDeliveryOption
+    extra = 1
+
+
+class DeliveryInformationInline(admin.StackedInline):
+    model = models.DeliveryInformation
+    extra = 1
+    fields = (
+        "id",
+        delivery_information_change_form_link,
+    )
+    readonly_fields = (
+        delivery_information_change_form_link,
+    )
+
+
 class ItemSpecificationInline(admin.StackedInline):
     model = models.ItemSpecification
     extra = 1
@@ -33,6 +74,8 @@ class ItemSpecificationInline(admin.StackedInline):
 class OrderAdmin(admin.ModelAdmin):
     inlines = (
         SelectedOrderOptionInline,
+        SelectedDeliveryOptionInline,
+        DeliveryInformationInline,
         ItemSpecificationInline,
     )
     fieldsets = (
@@ -85,7 +128,8 @@ class OrderAdmin(admin.ModelAdmin):
 @admin.register(models.OrderPendingModeration)
 class PendingOrderAdmin(admin.ModelAdmin):
     actions = ["approve_order", "reject_order"]
-    list_display = ("id", "order_type", "user")
+    list_display = (order_change_form_link, "order_type", "user")
+    list_display_links = None
 
     def get_actions(self, request):
         actions = super(PendingOrderAdmin, self).get_actions(request)
@@ -104,23 +148,39 @@ class PendingOrderAdmin(admin.ModelAdmin):
         return False
 
     def approve_order(self, request, queryset):
+        moderated_order_ids = []
         for order in queryset:
+            moderated_order_ids.append(order.id)
             config = utilities.get_generic_order_config(order.order_type)
             requestprocessor.handle_submit(
                 order=order,
                 approved=True,
-                notify=config["notify_moderation"]
+                notify=config["notifications"]["moderation"]
             )
+        if len(moderated_order_ids) == 1:
+            msg = "Order {} has been rejected".format(moderated_order_ids[0])
+        else:
+            msg = "Orders {} have been rejected".format(
+                ", ".join(str(id_) for id_ in moderated_order_ids))
+        self.message_user(request, message=msg)
     approve_order.short_description = "Approve selected orders"
 
     def reject_order(self, request, queryset):
+        moderated_order_ids = []
         for order in queryset:
+            moderated_order_ids.append(order.id)
             config = utilities.get_generic_order_config(order.order_type)
             requestprocessor.handle_submit(
                 order=order,
                 approved=False,
-                notify=config["notify_moderation"]
+                notify=config["notifications"]["moderation"]
             )
+        if len(moderated_order_ids) == 1:
+            msg = "Order {} has been rejected".format(moderated_order_ids[0])
+        else:
+            msg = "Orders {} have been rejected".format(
+                ", ".join(str(id_) for id_ in moderated_order_ids))
+        self.message_user(request, message=msg)
     reject_order.short_description = "Reject selected orders"
 
 
@@ -193,18 +253,29 @@ class OrderItemAdmin(admin.ModelAdmin):
     link_to_order.allow_tags = True
 
 
-#@admin.register(models.Batch)
-#class BatchAdmin(admin.ModelAdmin):
-#    list_display = ("id", "order", "status", "price", "created_on",
-#                    "completed_on", "updated_on",)
-
-
-#@admin.register(models.SubscriptionBatch)
-#class SubscriptionBatchAdmin(admin.ModelAdmin):
-#    list_display = ("id", "timeslot", "collection", "status", "price",
-#                    "created_on", "completed_on", "updated_on",)
-
-
-admin.site.register(models.DeliveryInformation)
-admin.site.register(models.OnlineAddress)
-admin.site.register(models.InvoiceAddress)
+@admin.register(models.DeliveryInformation)
+class DeliveryInformationAdmin(admin.ModelAdmin):
+    inlines = (
+        OnlineAddressInline,
+    )
+    fieldsets = (
+        (None, {
+            "fields": (
+                "order",
+                "first_name",
+                "city",
+                "country",
+            )
+        }),
+        ("Further info", {
+            "classes": ("collapse",),
+            "fields": (
+                "first_name",
+                "city",
+                "country",
+            )
+        }),
+    )
+    readonly_fields = (
+        "order",
+    )

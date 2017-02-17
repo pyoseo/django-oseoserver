@@ -16,6 +16,7 @@
 
 from __future__ import absolute_import
 import logging
+from math import ceil
 
 from django.db import transaction
 import pyxb.bundles.opengis.oseo_1_0 as oseo
@@ -118,7 +119,7 @@ def check_delivery_protocol(protocol, delivery_type, order_type, collection):
         SelectedDeliveryOption.MEDIA_DELIVERY: (
             "media_delivery_options"),
     }[delivery_type]
-    allowed_protocols = collection_config[order_type.lower()][config_key]
+    allowed_protocols = collection_config[config_key]
     if protocol not in allowed_protocols:
         raise errors.InvalidParameterValueError(locator="protocol")
 
@@ -156,17 +157,23 @@ def create_item_specification(item, item_processor, order_type):
         The custom item_processor class used to process order items
 
     """
-
-    collection_id = (
-        item.productId.collectionId or
-        item_processor.get_collection_id(item.productId.identifier)
-    )
+    if order_type in (Order.PRODUCT_ORDER, Order.MASSIVE_ORDER):
+        collection_id = (
+            item.productId.collectionId or
+            item_processor.get_collection_id(item.productId.identifier)
+        )
+        identifier = _c(item.productId.identifier)
+    elif order_type == Order.SUBSCRIPTION_ORDER:
+        collection_id = item.subscriptionId.collectionId
+        identifier = ""
+    else:  # tasking order
+        raise NotImplementedError
     collection_name = check_collection_enabled(
         collection_id, order_type=order_type)
     item_specification = models.ItemSpecification(
         remark=_c(item.orderItemRemark),
         collection=collection_name,
-        identifier=_c(item.productId.identifier),
+        identifier=identifier,
         item_id=item.itemId
     )
     item_specification.full_clean()
@@ -399,105 +406,6 @@ def create_order_item(status, item_id, collection,
     return item
 
 
-# def create_processing_batch(initial_status, order_items, order_type,
-#                             item_processor):
-#     """Create an order batch for processing items.
-#
-#     Parameters
-#     ----------
-#     initial_status: str
-#         Status for the batch
-#     order_items: list
-#         An iterable with oseo.CommonOrderItemType instances that are to be
-#         turned into order items for the batch
-#     item_processor:
-#
-#     """
-#
-#     batch = models.ProcessingBatch(status=initial_status)
-#     batch.full_clean()
-#     batch.save()
-#     item_status, item_additional_status_info = get_order_item_initial_status(
-#         order_type)
-#     for oseo_item in order_items:
-#         item = create_product_order_item(
-#             item=oseo_item,
-#             status=item_status,
-#             item_processor=item_processor,
-#             additional_status=item_additional_status_info
-#         )
-#         batch.order_items.add(item)
-#         batch.save()
-#     return batch
-
-
-# def create_product_order_item(item, status, item_processor,
-#                               additional_status=""):
-#     """Create an order item for product orders
-#
-#     Parameters
-#     ----------
-#     item: oseo.CommonOrderItemType
-#         The requested item specification
-#     status: str
-#         Initial status for the order item
-#     item_processor: oseoserver.itemprocessor
-#         The custom item_processor class used to process order items
-#     additional_status: str, optional
-#         Additional status information
-#
-#     """
-#
-#     collection_id = (
-#         item.productId.collectionId or
-#         item_processor.get_collection_id(item.productId.identifier)
-#     )
-#     collection_name = check_collection_enabled(collection_id,
-#                                                Order.PRODUCT_ORDER)
-#     order_item = models.OrderItem(
-#         status=status,
-#         additional_status_info=additional_status,
-#         remark=_c(item.orderItemRemark),
-#         collection=collection_name,
-#         identifier=_c(item.productId.identifier),
-#         item_id=item.itemId
-#     )
-#     order_item.full_clean()
-#     order_item.save()
-#     for requested_option in item.option:
-#         values = requested_option.ParameterData.values
-#         # since values is an xsd:anyType, we will not do schema
-#         # validation on it
-#         values_tree = etree.fromstring(values.toxml(ENCODING))
-#         for element in values_tree:
-#             option = create_option(
-#                 option_element=element,
-#                 order_type=Order.PRODUCT_ORDER,
-#                 collection_name=collection_name,
-#                 customizable_item=order_item,
-#                 item_processor=item_processor
-#             )
-#             order_item.selected_options.add(option)
-#             option.save()
-#     if item.deliveryOptions is not None:
-#         item_delivery = create_delivery_option(
-#             oseo_delivery=item.deliveryOptions,
-#             collection=collection_name,
-#             order_type=Order.PRODUCT_ORDER
-#         )
-#         order_item.selected_delivery_option = item_delivery
-#         item_delivery.save()
-#     # scene selection options are not implemented yet
-#     # payment is not implemented yet
-#     # add extensions?
-#     order_item.save()
-#     return order_item
-
-
-def create_subscription_order_batch(order, collection, timeslot):
-    raise NotImplementedError
-
-
 def get_collection_settings(collection_id):
     for collection_config in settings.get_collections():
         if collection_config["collection_identifier"] == collection_id:
@@ -644,9 +552,18 @@ def process_request_order_specification(order_specification, user,
     order.full_clean()
     order.save()
     logger.debug("Validated general order parameters")
+    if order_type == Order.MASSIVE_ORDER and len(
+            order_specification.orderItem) > 1:
+        raise RuntimeError("Orders of type {!r} must specify a single "
+                           "order item".format(order_type))
     if order_specification.deliveryInformation is not None:
-        order.delivery_information = create_order_delivery_information(
+        delivery_information = create_order_delivery_information(
             order_specification.deliveryInformation)
+        delivery_information.order = order
+        delivery_information.save()
+        #order.delivery_information = create_order_delivery_information(
+        #    order_specification.deliveryInformation)
+        #order.save()
     logger.debug("Extracted order delivery information")
     if order_specification.invoiceAddress is not None:
         order.invoice_address = create_order_invoice_address(
@@ -682,9 +599,9 @@ def process_request_order_specification(order_specification, user,
         values = requested_option.ParameterData.values
         # since values is an xsd:anyType, we will not do schema
         # validation on it
-        values_tree = etree.fromstring(
+        values_element = etree.fromstring(
             values.toxml(ENCODING), parser=get_etree_parser())
-        for element in values_tree:
+        for element in values_element:
             for collection in requested_collections:
                 option = create_option(
                     option_element=element,
@@ -693,8 +610,8 @@ def process_request_order_specification(order_specification, user,
                     customizable_item=order,
                     item_processor=item_processor
                 )
-                order.selected_options.add(option)
                 option.save()
+                order.selected_options.add(option)
     logger.debug("Extracted order options")
     order.full_clean()
     validate_order_size(order, item_processor)
@@ -745,11 +662,12 @@ def submit(request, user):
 
 
 def validate_order_size(order, item_processor):
-    total_item_count = _get_order_total_item_count(order, item_processor)
-    _validate_order_number_of_items(total_item_count)
+    item_count = _get_order_item_count(order, item_processor)
+    _validate_order_number_of_items(
+        order_items=item_count, order_type=order.order_type)
     _validate_active_order_items(
         order_type=order.order_type,
-        order_items=total_item_count,
+        order_items=item_count,
         user=order.user
     )
 
@@ -799,11 +717,22 @@ def _get_initial_status(order_type):
     return status
 
 
-def _get_order_total_item_count(order, item_processor):
+def _get_order_item_count(order, item_processor):
     if order.order_type in (Order.PRODUCT_ORDER, Order.SUBSCRIPTION_ORDER):
         item_count = len(order.item_specifications.all())
     elif order.order_type == Order.MASSIVE_ORDER:
-        item_count = item_processor.estimate_number_massive_order_items(order)
+        item_count = 0
+        for item_specification in order.item_specifications.all():
+            collection = item_specification.collection
+            start, end = item_processor.get_order_duration(
+                item_specification)
+            ids = item_processor.get_massive_order_batch_item_identifiers(
+                    batch_index=0,
+                    collection=collection,
+                    start=start,
+                    end=end
+                )
+            item_count += len(ids)
     else:
         raise NotImplementedError
     return item_count
@@ -822,8 +751,11 @@ def _validate_active_order_items(order_type, order_items, user):
         raise errors.NoApplicableCodeError()
 
 
-def _validate_order_number_of_items(order_items):
-    MAX_ORDER_ITEMS = settings.get_max_order_items()
+def _validate_order_number_of_items(order_items, order_type):
+    if order_type == Order.MASSIVE_ORDER:
+        MAX_ORDER_ITEMS = settings.get_massive_order_max_size()
+    else:
+        MAX_ORDER_ITEMS = settings.get_max_order_items()
     if order_items > MAX_ORDER_ITEMS:
         error_msg = (
             "Each order may not request a number of individual items greater "
@@ -831,4 +763,5 @@ def _validate_order_number_of_items(order_items):
             "an order of type {!r}.".format(
                 MAX_ORDER_ITEMS, Order.MASSIVE_ORDER)
         )
+        logger.error(error_msg)
         raise errors.NoApplicableCodeError

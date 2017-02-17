@@ -95,7 +95,6 @@ class CustomizableItem(models.Model):
         max_length=50,
         choices=STATUS_CHOICES,
         default=SUBMITTED,
-        help_text="initial status"
     )
     additional_status_info = models.TextField(
         help_text="Additional information about the status",
@@ -251,6 +250,9 @@ class OnlineAddress(models.Model):
     class Meta:
         verbose_name_plural = 'online addresses'
 
+    def __str__(self):
+        return "{} {}".format(self.protocol, self.server_address)
+
 
 @python_2_unicode_compatible
 class Order(CustomizableItem):
@@ -290,12 +292,12 @@ class Order(CustomizableItem):
         blank=True,
         null=True
     )
-    selected_delivery_option = models.OneToOneField(
-        'SelectedDeliveryOption',
-        related_name='order',
-        blank=True,
-        null=True
-    )
+    #selected_delivery_option = models.OneToOneField(
+    #    'SelectedDeliveryOption',
+    #    related_name='order',
+    #    blank=True,
+    #    null=True
+    #)
     user = models.ForeignKey(django_settings.AUTH_USER_MODEL,
                              related_name="%(app_label)s_%(class)s_orders")
     order_type = models.CharField(
@@ -499,7 +501,7 @@ class OrderItem(CustomizableItem):
             new_status = CustomizableItem.FAILED
             batch.completed_on = now
         else:
-            new_status = CustomizableItem.COMPLETED
+            new_status = item_statuses[0]
             batch.completed_on = now
         previous_status = batch.status
         if previous_status != new_status:
@@ -644,7 +646,7 @@ class SelectedItemOption(models.Model):
     )
 
     def __str__(self):
-        return self.value
+        return "{}={!r}".format(self.option, self.value)
 
 
 @python_2_unicode_compatible
@@ -659,7 +661,7 @@ class SelectedOrderOption(models.Model):
     )
 
     def __str__(self):
-        return self.value
+        return "{}={!r}".format(self.option, self.value)
 
 
 @python_2_unicode_compatible
@@ -698,7 +700,12 @@ class SelectedDeliveryOption(models.Model):
         (ONLINE_DATA_ACCESS, ONLINE_DATA_ACCESS),
         (ONLINE_DATA_DELIVERY, ONLINE_DATA_DELIVERY),
     ]
-
+    order = models.OneToOneField(
+        'Order',
+        related_name='selected_delivery_option',
+        blank=True,
+        null=True
+    )
     delivery_type = models.CharField(
         max_length=30,
         choices=DELIVERY_CHOICES,
@@ -827,11 +834,15 @@ class Batch(models.Model):
         if CustomizableItem.IN_PRODUCTION in existing_batch_statuses:
             new_status = CustomizableItem.IN_PRODUCTION
         else:  # check if we need to create any more batches
-            config = utilities.get_generic_order_config(self.order.order_type)
-            processor = utilities.import_class(config["item_processor"])
+            processor = utilities.get_item_processor(self.order.order_type)
+            item_spec = self.order.item_specifications.get()
+            start, end = processor.get_order_duration(item_spec)
             total_batches = processor.estimate_number_massive_order_batches(
-                self.order)
-            if len(self.order.batches.count()) == total_batches:
+                collection=item_spec.collection,
+                start=start,
+                end=end
+            )
+            if self.order.batches.count() == total_batches:
                 logger.debug("All batches have been created")
                 if CustomizableItem.FAILED in existing_batch_statuses:
                     new_status = CustomizableItem.FAILED

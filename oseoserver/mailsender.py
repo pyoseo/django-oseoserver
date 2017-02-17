@@ -101,7 +101,7 @@ def send_subscription_moderated_email(order, approved, recipients):
     item_availability_days = subscription_order_settings[
         "item_availability_days"]
     collections = []
-    for item in order.batches.first().order_items.all():
+    for item in order.item_specifications.all():
         collections.append((item.collection, item.selected_options.all()))
     template = "subscription_moderated.html"
     context = {
