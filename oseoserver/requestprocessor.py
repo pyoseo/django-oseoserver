@@ -129,7 +129,8 @@ def create_massive_order_batch(order, batch_index=0):
         all_identifiers.extend(product([item_specification], identifiers))
     batch = models.Batch(
         order=order,
-        status=order.status
+        status=order.status,
+        additional_status_info=order.additional_status_info
     )
     batch.full_clean()
     batch.save()
@@ -152,12 +153,15 @@ def create_product_order_batch(order):
     logger.debug("Creating a new batch...")
     batch = models.Batch(
         order=order,
-        status=order.status
+        status=order.status,
+        additional_status_info=order.additional_status_info
     )
     batch.full_clean()
     batch.save()
     for item_specification in order.item_specifications.all():
         order_item = models.OrderItem(
+            status=order.status,
+            additional_status_info=order.additional_status_info,
             item_specification=item_specification,
             batch=batch,
             identifier=item_specification.identifier,
@@ -172,7 +176,8 @@ def create_product_order_batch(order):
 def create_subscription_batch(order, timeslot, collection):
     batch = models.Batch(
         order=order,
-        status=order.status
+        status=order.status,
+        additional_status_info=order.additional_status_info
     )
     batch.full_clean()
     batch.save()

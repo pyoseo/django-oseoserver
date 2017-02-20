@@ -125,13 +125,6 @@ class CustomizableItem(models.Model):
     class Meta:
         abstract = True
 
-    #def __str__(self):
-    #    try:
-    #        instance = Order.objects.get(id=self.id)
-    #    except ObjectDoesNotExist:
-    #        instance = OrderItem.objects.get(id=self.id)
-    #    return instance.__str__()
-
     def create_oseo_delivery_options(self):
         """Create an OSEO DeliveryOptionsType"""
 
@@ -405,12 +398,6 @@ class ItemSpecification(models.Model):
         null=True,
         blank=True
     )
-    selected_delivery_option = models.OneToOneField(
-        'SelectedDeliveryOption',
-        related_name='item_specification',
-        blank=True,
-        null=True
-    )
     collection = models.CharField(
         max_length=255,
     )
@@ -467,71 +454,6 @@ class OrderItem(CustomizableItem):
     def __str__(self):
         return ("id: {0.id}, batch: {0.batch}".format(self))
 
-    def save(self, *args, **kwargs):
-        """Save instance into the database.
-
-        This method reimplements django's default model.save() behaviour in
-        order to update the item's batch's status.
-
-        """
-
-        super(OrderItem, self).save(*args, **kwargs)
-        if self.status not in (self.SUBMITTED, self.ACCEPTED, self.CANCELLED):
-            self.update_batch_status()
-
-    def update_batch_status(self):
-        """Update a batch's status
-
-        This method is called whenever an order item is saved.
-        """
-
-        batch = self.batch
-        now = dt.datetime.now(pytz.utc)
-        item_statuses = batch.order_items.values_list(
-            "status", flat=True).distinct()
-        if CustomizableItem.IN_PRODUCTION in item_statuses:
-            new_status = CustomizableItem.IN_PRODUCTION
-            batch.completed_on = None
-        elif CustomizableItem.FAILED in item_statuses:
-            new_status = CustomizableItem.FAILED
-            batch.completed_on = now
-        else:
-            new_status = item_statuses[0]
-            batch.completed_on = now
-        previous_status = batch.status
-        if previous_status != new_status:
-            batch.updated_on = now
-            batch.save()
-
-    def export_options(self):
-        valid_options = dict()
-        for order_option in self.batch.order.selected_options.all():
-            valid_options[order_option.option] = order_option.value
-        for item_option in self.item_specification.selected_options.all():
-            valid_options[item_option.option] = item_option.value
-        return valid_options
-
-    def export_delivery_options(self):
-        delivery_options = (
-            self.item_specification.selected_delivery_option or
-            self.batch.order.selected_delivery_option)
-        result = None
-        if delivery_options is not None:
-            result = {
-                "copies": delivery_options.copies,
-                "annotation": delivery_options.annotation,
-                "special_instructions": delivery_options.special_instructions,
-                "delivery_type": delivery_options.delivery_type,
-            }
-            delivery_type = delivery_options.delivery_type
-            if delivery_type == SelectedDeliveryOption.ONLINE_DATA_ACCESS:
-                result["protocol"] = delivery_options.delivery_details
-            elif delivery_type == SelectedDeliveryOption.ONLINE_DATA_DELIVERY:
-                pass
-            elif delivery_type == SelectedDeliveryOption.MEDIA_DELIVERY:
-                result["medium"] = delivery_options.delivery_details
-        return result
-
     def create_oseo_status_item_type(self):
         """Create a CommonOrderStatusItemType element"""
         sit = oseo.CommonOrderStatusItemType()
@@ -559,6 +481,142 @@ class OrderItem(CustomizableItem):
             _n(self.mission_specific_status_info)
         return sit
 
+    def export_delivery_options(self):
+        """Return a dictionary with the instance's delivery options.
+
+        This method's result is passed to custom order processor objects when
+        a request is actually processed. Order prcoessors receive a simplified
+        version of the delivery options.
+
+        """
+
+        try:
+            delivery_options = self.item_specification.selected_delivery_option
+        except ItemSpecificationDeliveryOption.DoesNotExist:
+            delivery_options = self.batch.order.selected_delivery_option
+        result = None
+        if delivery_options is not None:
+            result = {
+                "copies": delivery_options.copies,
+                "annotation": delivery_options.annotation,
+                "special_instructions": delivery_options.special_instructions,
+                "delivery_type": delivery_options.delivery_type,
+            }
+            delivery_type = delivery_options.delivery_type
+            if delivery_type == BaseDeliveryOption.ONLINE_DATA_ACCESS:
+                result["protocol"] = delivery_options.delivery_details
+            elif delivery_type == BaseDeliveryOption.ONLINE_DATA_DELIVERY:
+                pass
+            elif delivery_type == BaseDeliveryOption.MEDIA_DELIVERY:
+                result["medium"] = delivery_options.delivery_details
+        return result
+
+    def export_options(self):
+        valid_options = dict()
+        for order_option in self.batch.order.selected_options.all():
+            valid_options[order_option.option] = order_option.value
+        for item_option in self.item_specification.selected_options.all():
+            valid_options[item_option.option] = item_option.value
+        return valid_options
+
+    def process(self):
+        """Process the item.
+
+        Processing is done by delegating to the defined item processor for the
+        item's order type.
+
+        """
+
+        self.status = self.IN_PRODUCTION
+        self.additional_status_info = "Item is being processed"
+        self.save()
+        delivery_options = self.export_delivery_options()
+        processing_handler = {
+            BaseDeliveryOption.ONLINE_DATA_ACCESS: (
+                self._process_online_data_access),
+            BaseDeliveryOption.ONLINE_DATA_DELIVERY: (
+                self._process_online_data_delivery),
+        }[delivery_options["delivery_type"]]
+        try:
+            processing_result = processing_handler(delivery_options)
+        except Exception:
+            formatted_tb = traceback.format_exception(*sys.exc_info())
+            error_message = (
+                "Could not process order item {!r}. The error "
+                "was: {}".format(self, formatted_tb)
+            )
+            self.status = self.FAILED
+            logger.error(error_message)
+            self.additional_status_info = error_message
+            raise
+        else:
+            self.status = self.COMPLETED
+            self.additional_status_info = "Item processed successfully"
+            self.completed_on = dt.datetime.now(pytz.utc)
+            self.available = True
+            self.expires_on = self._create_expiry_date()
+        finally:
+            self.save()
+        return processing_result
+
+    def save(self, *args, **kwargs):
+        """Save instance into the database.
+
+        This method reimplements django's default model.save() behaviour in
+        order to update the item's batch's status.
+
+        """
+
+        super(OrderItem, self).save(*args, **kwargs)
+        if self.status not in (self.SUBMITTED, self.ACCEPTED, self.CANCELLED):
+            self.update_batch_status()
+
+    def update_batch_status(self):
+        """Update a batch's status
+
+        This method is called whenever an order item is saved.
+        """
+
+        logger.debug("Updating item's batch status...")
+        batch = self.batch
+        now = dt.datetime.now(pytz.utc)
+        additional = ""
+        completed_items = 0
+        failed_items = 0
+        for status, details in batch.order_items.values_list(
+                "status", "additional_status_info"):
+            if status == CustomizableItem.COMPLETED:
+                completed_items += 1
+            elif status == CustomizableItem.FAILED:
+                failed_items += 1
+                additional = " ".join((additional, details))
+        if batch.order_items.count() == completed_items + failed_items:
+            completed_on = now
+            if failed_items > 0:
+                new_status = CustomizableItem.FAILED
+            else:
+                new_status = CustomizableItem.COMPLETED
+        else:
+            completed_on = None
+            new_status = CustomizableItem.IN_PRODUCTION
+            additional = "Items are being processed"
+        previous_status = batch.status
+        if previous_status != new_status:
+            batch.status = new_status
+            batch.additional_status_info = additional
+            batch.updated_on = now
+            batch.completed_on = completed_on
+            batch.save()
+
+
+    def _create_expiry_date(self):
+        generic_order_config = utilities.get_generic_order_config(
+            self.batch.order.order_type)
+        now = dt.datetime.now(pytz.utc)
+        expiry_date = now + dt.timedelta(
+            days=generic_order_config.get("item_availability_days", 1))
+        return expiry_date
+
     def _process_online_data_access(self, delivery_options):
         item_processor = utilities.get_item_processor(
             order_type=self.batch.order.order_type)
@@ -580,53 +638,6 @@ class OrderItem(CustomizableItem):
 
     def _process_online_data_delivery(self, delivery_options):
         raise NotImplementedError
-
-    def process(self):
-        """Process the item
-
-        Processing is done by delegating to the defined item processor for the
-        item's order type.
-
-        """
-
-        self.status = self.IN_PRODUCTION
-        self.additional_status_info = "Item is being processed"
-        self.save()
-        delivery_options = self.export_delivery_options()
-        processing_handler = {
-            SelectedDeliveryOption.ONLINE_DATA_ACCESS: (
-                self._process_online_data_access),
-            SelectedDeliveryOption.ONLINE_DATA_DELIVERY: (
-                self._process_online_data_delivery),
-        }[delivery_options["delivery_type"]]
-        try:
-            processing_result = processing_handler(delivery_options)
-        except Exception:
-            formatted_tb = traceback.format_exception(*sys.exc_info())
-            error_message = (
-                "Could not process order item {!r}. The error "
-                "was: {}".format(self, formatted_tb)
-            )
-            self.status = self.FAILED
-            self.additional_status_info = error_message
-            raise
-        else:
-            self.status = self.COMPLETED
-            self.additional_status_info = "Item processed successfully"
-            self.completed_on = dt.datetime.now(pytz.utc)
-            self.available = True
-            self.expires_on = self._create_expiry_date()
-        finally:
-            self.save()
-        return processing_result
-
-    def _create_expiry_date(self):
-        generic_order_config = utilities.get_generic_order_config(
-            self.batch.order.order_type)
-        now = dt.datetime.now(pytz.utc)
-        expiry_date = now + dt.timedelta(
-            days=generic_order_config.get("item_availability_days", 1))
-        return expiry_date
 
 
 @python_2_unicode_compatible
@@ -685,8 +696,7 @@ class SelectedSceneSelectionOption(models.Model):
         return self.value
 
 
-@python_2_unicode_compatible
-class SelectedDeliveryOption(models.Model):
+class BaseDeliveryOption(models.Model):
     MEDIA_DELIVERY = "mediadelivery"
     ONLINE_DATA_ACCESS = "onlinedataaccess"
     ONLINE_DATA_DELIVERY = "onlinedatadelivery"
@@ -695,12 +705,7 @@ class SelectedDeliveryOption(models.Model):
         (ONLINE_DATA_ACCESS, ONLINE_DATA_ACCESS),
         (ONLINE_DATA_DELIVERY, ONLINE_DATA_DELIVERY),
     ]
-    order = models.OneToOneField(
-        'Order',
-        related_name='selected_delivery_option',
-        blank=True,
-        null=True
-    )
+
     delivery_type = models.CharField(
         max_length=30,
         choices=DELIVERY_CHOICES,
@@ -720,8 +725,31 @@ class SelectedDeliveryOption(models.Model):
     annotation = models.TextField(blank=True)
     special_instructions = models.TextField(blank=True)
 
+    class Meta:
+        abstract = True
+
     def __str__(self):
         return "{0.delivery_type}, {0.delivery_details}".format(self)
+
+
+@python_2_unicode_compatible
+class OrderDeliveryOption(BaseDeliveryOption):
+    order = models.OneToOneField(
+        'Order',
+        related_name='selected_delivery_option',
+        blank=True,
+        null=True
+    )
+
+
+@python_2_unicode_compatible
+class ItemSpecificationDeliveryOption(BaseDeliveryOption):
+    item_specification = models.OneToOneField(
+        'ItemSpecification',
+        related_name='selected_delivery_option',
+        blank=True,
+        null=True
+    )
 
 
 @python_2_unicode_compatible
@@ -744,6 +772,10 @@ class Batch(models.Model):
         choices=CustomizableItem.STATUS_CHOICES,
         default=CustomizableItem.SUBMITTED,
         help_text="processing status"
+    )
+    additional_status_info = models.TextField(
+        help_text="Additional information about the status",
+        blank=True
     )
 
     class Meta:

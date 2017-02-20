@@ -31,7 +31,7 @@ from ..utilities import get_etree_parser
 from ..constants import ENCODING
 from ..models import CustomizableItem
 from ..models import Order
-from ..models import SelectedDeliveryOption
+from ..models import BaseDeliveryOption
 
 logger = logging.getLogger(__name__)
 
@@ -54,50 +54,6 @@ def check_collection_enabled(collection_id, order_type):
         return collection_settings["name"]
 
 
-def create_delivery_option(oseo_delivery, collection, order_type):
-    """Parse delivery options into a django instance.
-
-    Parameters
-    ----------
-    oseo_delivery: pyxb.bundles.opengis.raw.oseo_1_0.DeliveryOptionsType
-        The requested delivery options
-    collection:
-
-    """
-
-    if oseo_delivery.mediaDelivery is not None:
-        details = ", ".join((
-            oseo_delivery.mediaDelivery.packageMedium,
-            _c(oseo_delivery.mediaDelivery.shippingInstructions)
-        ))
-        delivery_type = models.SelectedDeliveryOption.MEDIA_DELIVERY
-    else:
-        if oseo_delivery.onlineDataAccess is not None:
-            details = oseo_delivery.onlineDataAccess.protocol
-        else:
-            details = oseo_delivery.onlineDataDelivery.protocol
-        delivery_type = (
-            models.SelectedDeliveryOption.ONLINE_DATA_ACCESS if
-            oseo_delivery.onlineDataAccess is not None else
-            models.SelectedDeliveryOption.ONLINE_DATA_DELIVERY
-        )
-        check_delivery_protocol(
-            protocol=details,
-            delivery_type=delivery_type,
-            order_type=order_type,
-            collection=collection
-        )
-    delivery_option = models.SelectedDeliveryOption(
-        delivery_type=delivery_type,
-        annotation=_c(oseo_delivery.productAnnotation),
-        copies=oseo_delivery.numberOfCopies or 1,
-        special_instructions=_c(oseo_delivery.specialInstructions),
-        delivery_details=details,
-    )
-    delivery_option.full_clean()
-    return delivery_option
-
-
 def check_delivery_protocol(protocol, delivery_type, order_type, collection):
     """Ensure the provided protocol is enabled in the settings.
 
@@ -112,11 +68,11 @@ def check_delivery_protocol(protocol, delivery_type, order_type, collection):
 
     collection_config = get_order_configuration(order_type, collection)
     config_key = {
-        SelectedDeliveryOption.ONLINE_DATA_ACCESS: (
+        BaseDeliveryOption.ONLINE_DATA_ACCESS: (
             "online_data_access_options"),
-        SelectedDeliveryOption.ONLINE_DATA_DELIVERY: (
+        BaseDeliveryOption.ONLINE_DATA_DELIVERY: (
             "online_data_delivery_options"),
-        SelectedDeliveryOption.MEDIA_DELIVERY: (
+        BaseDeliveryOption.MEDIA_DELIVERY: (
             "media_delivery_options"),
     }[delivery_type]
     allowed_protocols = collection_config[config_key]
@@ -144,6 +100,61 @@ def check_order_type_enabled(order_type):
             raise errors.SubscriptionNotSupportedError()
         else:  # Order.TASKING_ORDER
             raise errors.FutureProductNotSupportedError()
+
+
+def create_delivery_option(oseo_delivery, collection, order_type,
+                           customizable_item):
+    """Create a delivery option for an order or order item
+
+    Parameters
+    ----------
+    oseo_delivery: pyxb.bundles.opengis.raw.oseo_1_0.DeliveryOptionsType
+        The requested delivery options
+    collection: str
+        Name of the collection
+    order_type: str
+        Type of order
+    customizable_item: models.Order or models.OrderItem
+        The type of model that is to have this option created for
+
+    """
+
+    if oseo_delivery.mediaDelivery is not None:
+        details = ", ".join((
+            oseo_delivery.mediaDelivery.packageMedium,
+            _c(oseo_delivery.mediaDelivery.shippingInstructions)
+        ))
+        delivery_type = models.BaseDeliveryOption.MEDIA_DELIVERY
+    else:
+        if oseo_delivery.onlineDataAccess is not None:
+            details = oseo_delivery.onlineDataAccess.protocol
+        else:
+            details = oseo_delivery.onlineDataDelivery.protocol
+        delivery_type = (
+            models.BaseDeliveryOption.ONLINE_DATA_ACCESS if
+            oseo_delivery.onlineDataAccess is not None else
+            models.BaseDeliveryOption.ONLINE_DATA_DELIVERY
+        )
+        check_delivery_protocol(
+            protocol=details,
+            delivery_type=delivery_type,
+            order_type=order_type,
+            collection=collection
+        )
+    ModelClass = (
+        models.OrderDeliveryOption if
+        isinstance(customizable_item, models.Order) else
+        models.ItemDeliveryOption
+    )
+    delivery_option = ModelClass(
+        delivery_type=delivery_type,
+        annotation=_c(oseo_delivery.productAnnotation),
+        copies=oseo_delivery.numberOfCopies or 1,
+        special_instructions=_c(oseo_delivery.specialInstructions),
+        delivery_details=details,
+    )
+    delivery_option.full_clean()
+    return delivery_option
 
 
 def create_item_specification(item, item_processor, order_type):
@@ -198,8 +209,10 @@ def create_item_specification(item, item_processor, order_type):
         item_delivery = create_delivery_option(
             oseo_delivery=item.deliveryOptions,
             collection=collection_name,
-            order_type=Order.PRODUCT_ORDER
+            order_type=Order.PRODUCT_ORDER,
+            customizable_item=item
         )
+        item_delivery.item_specification = item_specification
         item_specification.selected_delivery_option = item_delivery
         item_delivery.save()
     # scene selection options are not implemented yet
@@ -561,9 +574,6 @@ def process_request_order_specification(order_specification, user,
             order_specification.deliveryInformation)
         delivery_information.order = order
         delivery_information.save()
-        #order.delivery_information = create_order_delivery_information(
-        #    order_specification.deliveryInformation)
-        #order.save()
     logger.debug("Extracted order delivery information")
     if order_specification.invoiceAddress is not None:
         order.invoice_address = create_order_invoice_address(
@@ -588,10 +598,13 @@ def process_request_order_specification(order_specification, user,
             delivery_option = create_delivery_option(
                 oseo_delivery=order_specification.deliveryOptions,
                 collection=collection,
-                order_type=order_type
+                order_type=order_type,
+                customizable_item=order
             )
+            delivery_option.order = order
             delivery_option.save()
             order.selected_delivery_option = delivery_option
+            order.save()
     logger.debug("Extracted order delivery options")
     # order options are processed last because we need to know the order
     # items first

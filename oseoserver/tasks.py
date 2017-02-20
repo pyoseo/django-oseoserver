@@ -100,17 +100,17 @@ def notify_user_batch_available(self, batch_id):
 def process_batch(self, batch_id):
     """Process a batch in the queue."""
     batch = models.Batch.objects.get(id=batch_id)
-    item_tasks = [
-        process_item.subtask((item.id,)) for item in batch.order_items.all()]
-    batch_group = group(*item_tasks)
+    batch_group = group(
+        process_item.signature((i.id,)) for i in batch.order_items.all())
     config = utilities.get_generic_order_config(batch.order.order_type)
     notify_batch_available = config["notifications"]["batch_availability"]
     if notify_batch_available.lower() == "immediate":
         batch_chain = chain(
             batch_group,
-            notify_user_batch_available.subtask((batch_id,))
+            notify_user_batch_available.signature((batch_id,))
         )
-        batch_chain.apply_async()
+        logger.info("batch_chain: {}".format(batch_chain))
+        batch_chain()
     else:
         batch_group.apply_async()
 

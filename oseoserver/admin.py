@@ -48,8 +48,8 @@ class SelectedOrderOptionInline(admin.StackedInline):
     extra = 1
 
 
-class SelectedDeliveryOptionInline(admin.StackedInline):
-    model = models.SelectedDeliveryOption
+class OrderDeliveryOptionInline(admin.StackedInline):
+    model = models.OrderDeliveryOption
     extra = 1
 
 
@@ -74,7 +74,7 @@ class ItemSpecificationInline(admin.StackedInline):
 class OrderAdmin(admin.ModelAdmin):
     inlines = (
         SelectedOrderOptionInline,
-        SelectedDeliveryOptionInline,
+        OrderDeliveryOptionInline,
         DeliveryInformationInline,
         ItemSpecificationInline,
     )
@@ -109,6 +109,9 @@ class OrderAdmin(admin.ModelAdmin):
         "status",
         "status_changed_on",
         "user",
+    )
+    list_display_links = (
+        "order_type",
     )
     list_filter = (
         "status",
