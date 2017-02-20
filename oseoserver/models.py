@@ -292,12 +292,6 @@ class Order(CustomizableItem):
         blank=True,
         null=True
     )
-    #selected_delivery_option = models.OneToOneField(
-    #    'SelectedDeliveryOption',
-    #    related_name='order',
-    #    blank=True,
-    #    null=True
-    #)
     user = models.ForeignKey(django_settings.AUTH_USER_MODEL,
                              related_name="%(app_label)s_%(class)s_orders")
     order_type = models.CharField(
@@ -482,7 +476,8 @@ class OrderItem(CustomizableItem):
         """
 
         super(OrderItem, self).save(*args, **kwargs)
-        self.update_batch_status()
+        if self.status not in (self.SUBMITTED, self.ACCEPTED, self.CANCELLED):
+            self.update_batch_status()
 
     def update_batch_status(self):
         """Update a batch's status
