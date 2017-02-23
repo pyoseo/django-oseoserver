@@ -412,6 +412,9 @@ class ItemSpecification(models.Model):
         help_text="Id for the item in the order request"
     )
 
+    def __str__(self):
+        return "{0.id}".format(self)
+
 
 @python_2_unicode_compatible
 class OrderItem(CustomizableItem):
@@ -494,21 +497,19 @@ class OrderItem(CustomizableItem):
             delivery_options = self.item_specification.selected_delivery_option
         except ItemSpecificationDeliveryOption.DoesNotExist:
             delivery_options = self.batch.order.selected_delivery_option
-        result = None
-        if delivery_options is not None:
-            result = {
-                "copies": delivery_options.copies,
-                "annotation": delivery_options.annotation,
-                "special_instructions": delivery_options.special_instructions,
-                "delivery_type": delivery_options.delivery_type,
-            }
-            delivery_type = delivery_options.delivery_type
-            if delivery_type == BaseDeliveryOption.ONLINE_DATA_ACCESS:
-                result["protocol"] = delivery_options.delivery_details
-            elif delivery_type == BaseDeliveryOption.ONLINE_DATA_DELIVERY:
-                pass
-            elif delivery_type == BaseDeliveryOption.MEDIA_DELIVERY:
-                result["medium"] = delivery_options.delivery_details
+        result = {
+            "copies": delivery_options.copies,
+            "annotation": delivery_options.annotation,
+            "special_instructions": delivery_options.special_instructions,
+            "delivery_type": delivery_options.delivery_type,
+        }
+        delivery_type = delivery_options.delivery_type
+        if delivery_type == BaseDeliveryOption.ONLINE_DATA_ACCESS:
+            result["protocol"] = delivery_options.delivery_details
+        elif delivery_type == BaseDeliveryOption.ONLINE_DATA_DELIVERY:
+            pass
+        elif delivery_type == BaseDeliveryOption.MEDIA_DELIVERY:
+            result["medium"] = delivery_options.delivery_details
         return result
 
     def export_options(self):
@@ -530,15 +531,26 @@ class OrderItem(CustomizableItem):
         self.status = self.IN_PRODUCTION
         self.additional_status_info = "Item is being processed"
         self.save()
+        item_processor = utilities.get_item_processor(
+            order_type=self.batch.order.order_type)
+        options = self.export_options()
         delivery_options = self.export_delivery_options()
-        processing_handler = {
-            BaseDeliveryOption.ONLINE_DATA_ACCESS: (
-                self._process_online_data_access),
-            BaseDeliveryOption.ONLINE_DATA_DELIVERY: (
-                self._process_online_data_delivery),
-        }[delivery_options["delivery_type"]]
         try:
-            processing_result = processing_handler(delivery_options)
+            result = item_processor.process_item(
+                identifier=self.identifier,
+                item_id=self.item_specification.item_id,
+                order_id=self.batch.order.id,
+                user_name=self.batch.order.user.username,
+                delivery_type=delivery_options["delivery_type"],
+                protocol=delivery_options["protocol"],
+                packaging=self.batch.order.packaging,
+                annotation=delivery_options["annotation"],
+                copies=delivery_options["copies"],
+                special_instructions=delivery_options["special_instructions"],
+                options=options
+            )
+            url, output_path = result
+            self.url = url
         except Exception:
             formatted_tb = traceback.format_exception(*sys.exc_info())
             error_message = (
@@ -568,7 +580,10 @@ class OrderItem(CustomizableItem):
         """
 
         super(OrderItem, self).save(*args, **kwargs)
-        if self.status not in (self.SUBMITTED, self.ACCEPTED, self.CANCELLED):
+        if self.status not in (self.ACCEPTED,
+                               self.CANCELLED,
+                               self.SUBMITTED,
+                               self.SUSPENDED):
             self.update_batch_status()
 
     def update_batch_status(self):
@@ -608,7 +623,6 @@ class OrderItem(CustomizableItem):
             batch.completed_on = completed_on
             batch.save()
 
-
     def _create_expiry_date(self):
         generic_order_config = utilities.get_generic_order_config(
             self.batch.order.order_type)
@@ -616,28 +630,6 @@ class OrderItem(CustomizableItem):
         expiry_date = now + dt.timedelta(
             days=generic_order_config.get("item_availability_days", 1))
         return expiry_date
-
-    def _process_online_data_access(self, delivery_options):
-        item_processor = utilities.get_item_processor(
-            order_type=self.batch.order.order_type)
-        processor_options = self.export_options()
-        url, output_path = item_processor.process_item_online_access(
-            identifier=self.identifier,
-            item_id=self.item_specification.item_id,
-            order_id=self.batch.order.id,
-            user_name=self.batch.order.user.username,
-            packaging=self.batch.order.packaging,
-            annotation=delivery_options["annotation"],
-            copies=delivery_options["copies"],
-            special_instructions=delivery_options["special_instructions"],
-            **processor_options
-
-        )
-        self.url = url
-        return url, output_path
-
-    def _process_online_data_delivery(self, delivery_options):
-        raise NotImplementedError
 
 
 @python_2_unicode_compatible
@@ -791,8 +783,13 @@ class Batch(models.Model):
         order to update the batch's order status.
 
         """
+
         super(Batch, self).save(*args, **kwargs)
-        self.update_order_status()
+        if self.status not in (CustomizableItem.ACCEPTED,
+                               CustomizableItem.CANCELLED,
+                               CustomizableItem.SUBMITTED,
+                               CustomizableItem.SUSPENDED):
+            self.update_order_status()
 
     def update_order_status(self):
         if self.order.order_type == Order.PRODUCT_ORDER:
@@ -805,6 +802,9 @@ class Batch(models.Model):
             raise NotImplementedError
         previous_status = self.order.status
         if previous_status != new_status:
+            logger.debug(
+                "Updating batch's order status to {!r}".format(new_status)
+            )
             now = dt.datetime.now(pytz.utc)
             self.order.status_changed_on = now
             self.order.status = new_status
@@ -812,7 +812,7 @@ class Batch(models.Model):
             if new_status in (CustomizableItem.COMPLETED,
                               CustomizableItem.FAILED):
                 self.order.completed_on = now
-        self.order.save()
+            self.order.save()
 
     def create_oseo_items_status(self):
         items_status = []

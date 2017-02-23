@@ -144,7 +144,7 @@ def create_delivery_option(oseo_delivery, collection, order_type,
     ModelClass = (
         models.OrderDeliveryOption if
         isinstance(customizable_item, models.Order) else
-        models.ItemDeliveryOption
+        models.ItemSpecificationDeliveryOption
     )
     delivery_option = ModelClass(
         delivery_type=delivery_type,
@@ -608,6 +608,8 @@ def process_request_order_specification(order_specification, user,
     logger.debug("Extracted order delivery options")
     # order options are processed last because we need to know the order
     # items first
+    validate_order_delivery_options(order)
+    logger.debug("Validated delivery options for order and items")
     for requested_option in order_specification.option:
         values = requested_option.ParameterData.values
         # since values is an xsd:anyType, we will not do schema
@@ -683,6 +685,39 @@ def validate_order_size(order, item_processor):
         order_items=item_count,
         user=order.user
     )
+
+
+def validate_order_delivery_options(order):
+    """Assert that an order has delivery options for all of its items.
+
+    The OSEO standard states that an order may have delivery options set at
+    the order level or at the item level. either way, a delivery specification
+    must always be present.
+
+    Raises
+    ------
+    models.ItemSpecificationDeliveryOption.DoesNotExist
+        If an order item does not have any delivery options defined at the item
+        level nor at the order level
+
+    """
+
+    try:
+        order_delivery = order.selected_delivery_option
+    except models.OrderDeliveryOption.DoesNotExist:
+        logger.warning(
+            "Order {!r} does not specify any delivery options. Inspecting "
+            "individual item specifications...".format(order)
+        )
+        for item_specification in order.item_specifications.all():
+            try:
+                item_delivery = item_specification.selected_delivery_option
+            except models.ItemSpecificationDeliveryOption.DoesNotExist:
+                logger.error(
+                    "Item {!r} does not specify delivery options. Cannot "
+                    "deliver such an item".format(item_specification)
+                )
+                raise
 
 
 def _get_delivery_address(delivery_address_type):

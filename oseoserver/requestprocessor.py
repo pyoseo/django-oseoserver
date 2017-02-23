@@ -240,6 +240,8 @@ def handle_massive_order(order):
     batch = create_massive_order_batch(order, batch_index=0)
     batch.order = order
     order.save()
+    logger.info(
+        "Sending first batch of order {!r} to processing queue".format(order))
     celery.current_app.send_task(
         "oseoserver.tasks.process_batch", (batch.id,))
 
@@ -262,11 +264,24 @@ def handle_product_order(order):
                                     "available processing slot")
     batch = create_product_order_batch(order)
     order.save()
+    logger.info("Sending order {!r} to processing queue...".format(order))
     celery.current_app.send_task(
         "oseoserver.tasks.process_batch", (batch.id,))
 
 
 def handle_submit(order, approved, notify=False):
+    """Handle a newly submitted order after it has been moderated
+
+    Parameters
+    ----------
+    order: models.Order
+        The order to handle
+    approved: bool
+        Whether the order has been approved or rejected
+    notify: bool, optional
+        Whether to e-mail the order's user informing of the moderation result
+    """
+
     if approved:
         order.status = Order.ACCEPTED
         order.additional_status_info = (

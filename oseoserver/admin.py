@@ -28,6 +28,16 @@ def delivery_information_change_form_link(instance):
 delivery_information_change_form_link.short_description = "Details"
 
 
+def item_specification_change_form_link(instance):
+    change_form_url = reverse(
+        "admin:oseoserver_itemspecification_change", args=(instance.id,))
+    result = format_html(
+        '<a href="{}">Item specification {}</a>', change_form_url, instance.id)
+    return result
+item_specification_change_form_link.short_description = (
+    "Details")
+
+
 class OnlineAddressInline(admin.StackedInline):
     model = models.OnlineAddress
     extra = 1
@@ -35,21 +45,26 @@ class OnlineAddressInline(admin.StackedInline):
 
 class SelectedPaymentOptionInline(admin.StackedInline):
     model = models.SelectedPaymentOption
-    extra = 1
+    extra = 0
 
 
 class SelectedSceneSelectionOptionInline(admin.StackedInline):
     model = models.SelectedSceneSelectionOption
-    extra = 1
+    extra = 0
 
 
 class SelectedOrderOptionInline(admin.StackedInline):
     model = models.SelectedOrderOption
-    extra = 1
+    extra = 0
 
 
 class OrderDeliveryOptionInline(admin.StackedInline):
     model = models.OrderDeliveryOption
+    extra = 0
+
+
+class ItemSpecificationDeliveryOptionInline(admin.StackedInline):
+    model = models.ItemSpecificationDeliveryOption
     extra = 1
 
 
@@ -67,7 +82,15 @@ class DeliveryInformationInline(admin.StackedInline):
 
 class ItemSpecificationInline(admin.StackedInline):
     model = models.ItemSpecification
-    extra = 1
+    extra = 0
+    fields = (
+        "collection",
+        "identifier",
+        item_specification_change_form_link,
+    )
+    readonly_fields = (
+        item_specification_change_form_link,
+    )
 
 
 @admin.register(models.Order)
@@ -185,6 +208,21 @@ class PendingOrderAdmin(admin.ModelAdmin):
                 ", ".join(str(id_) for id_ in moderated_order_ids))
         self.message_user(request, message=msg)
     reject_order.short_description = "Reject selected orders"
+
+
+@admin.register(models.ItemSpecification)
+class ItemSpecificationAdmin(admin.ModelAdmin):
+    inlines = (
+        ItemSpecificationDeliveryOptionInline,
+    )
+
+    def get_model_perms(self, request):
+        # This is a hack to hide this model from the admin index
+        # We should be using ModelAdmin.has_module_permission() instead
+        # but there is a django bug that prevents it. See:
+        # https://github.com/django/django/pull/7367
+        # for more details. This should be fixed in django v1.11+
+        return {}
 
 
 @admin.register(models.OrderItem)
