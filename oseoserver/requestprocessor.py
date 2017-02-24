@@ -171,7 +171,7 @@ def create_product_order_batch(order):
     return batch
 
 
-# TODO - untested code!
+# TODO - TRY TO FIND THE BATCH BEFORE CREATING IT
 @transaction.atomic()
 def create_subscription_batch(order, timeslot, collection):
     batch = models.Batch(

@@ -5,14 +5,44 @@ from django.http import HttpResponse
 from django.http import HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from lxml import etree
+from rest_framework import viewsets
+from rest_framework.decorators import detail_route
+from rest_framework.response import Response
 
 from .constants import ENCODING
 from . import errors
+from . import models
+from . import serializers
 from . import soap
 from . import requestprocessor
 from .utilities import get_etree_parser
 
 logger = logging.getLogger(__name__)
+
+
+class SubscriptionOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = models.Order.objects.filter(
+        order_type=models.Order.SUBSCRIPTION_ORDER)
+    serializer_class = serializers.SubscriptionOrderSerializer
+
+    @detail_route(methods=["POST",])
+    def cancel(self, request, *args, **kwargs):
+        subscription = self.get_object()
+        logger.debug("Would cancel subscription {0.id}".format(subscription))
+        return Response()
+
+
+class SubscriptionBatchViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = models.Batch.objects.filter(
+        order__order_type=models.Order.SUBSCRIPTION_ORDER)
+    serializer_class = serializers.SubscriptionBatchSerializer
+
+    @detail_route(methods=["POST",])
+    def clean(self, request, *args, **kwargs):
+        batch = self.get_object()
+        logger.debug("Would clean subscription "
+                     "batch {0.id}".format(subscription))
+        return Response()
 
 
 # TODO: Add authorization controls

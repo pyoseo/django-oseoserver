@@ -1,4 +1,4 @@
--r base.txt
+-r production.txt
 httpie==0.9.9
 mock==2.0.0
 pytest==3.0.5
