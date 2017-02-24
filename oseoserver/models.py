@@ -361,6 +361,25 @@ class Order(CustomizableItem):
                 raise NotImplementedError
         return om
 
+    def export_delivery_information(self):
+        """Return a dictionary with the instance's delivery information.
+
+        This method's result is passed to custom order processor objects when
+        a request is delivered.
+
+        """
+
+        result = {"online_addresses": []}
+        for online_address in self.delivery_information.online_addresses.all():
+            result["online_addresses"].append({
+                "protocol": online_address.protocol,
+                "server_address": online_address.server_address,
+                "user_name": online_address.user_name,
+                "user_password": online_address.user_password,
+                "path": online_address.path,
+            })
+        return result
+
 
 @python_2_unicode_compatible
 class OrderPendingModerationManager(models.Manager):
@@ -528,33 +547,57 @@ class OrderItem(CustomizableItem):
 
         """
 
-        self.status = self.IN_PRODUCTION
-        self.additional_status_info = "Item is being processed"
-        self.save()
+        self._set_status(self.IN_PRODUCTION, "Item is being processed")
         item_processor = utilities.get_item_processor(
             order_type=self.batch.order.order_type)
-        options = self.export_options()
-        delivery_options = self.export_delivery_options()
         try:
-            result = item_processor.process_item(
+            output_path = item_processor.prepare_item(
                 identifier=self.identifier,
-                item_id=self.item_specification.item_id,
-                order_id=self.batch.order.id,
-                user_name=self.batch.order.user.username,
-                delivery_type=delivery_options["delivery_type"],
-                protocol=delivery_options["protocol"],
-                packaging=self.batch.order.packaging,
-                annotation=delivery_options["annotation"],
-                copies=delivery_options["copies"],
-                special_instructions=delivery_options["special_instructions"],
-                options=options
+                options=self.export_options()
             )
-            url, output_path = result
-            self.url = url
         except Exception:
             formatted_tb = traceback.format_exception(*sys.exc_info())
             error_message = (
                 "Could not process order item {!r}. The error "
+                "was: {}".format(self, formatted_tb)
+            )
+            logger.error(error_message)
+            self._set_status(self.FAILED, error_message)
+            raise
+        return output_path
+
+    def deliver(self, path):
+        """Deliver the item
+
+        Delivery is done by delegating to the defined item processor.
+        """
+
+        self._set_status(self.IN_PRODUCTION, "Item is being delivered")
+        item_processor = utilities.get_item_processor(
+            order_type=self.batch.order.order_type)
+        delivery_options = self.export_delivery_options()
+        try:
+            delivery_information = (
+                self.batch.order.export_delivery_information())
+        except DeliveryInformation.DoesNotExist:
+            delivery_information = None
+        try:
+            url = item_processor.deliver_item(
+                item_path=path,
+                identifier=self.identifier,
+                item_id=self.item_specification.item_id,
+                batch_id=self.batch.id,
+                order_id=self.batch.order.id,
+                user_name=self.batch.order.user.username,
+                packaging=self.batch.order.packaging,
+                delivery_options=delivery_options,
+                delivery_information=delivery_information
+            )
+            self.url = url
+        except Exception:
+            formatted_tb = traceback.format_exception(*sys.exc_info())
+            error_message = (
+                "Could not deliver order item {!r}. The error "
                 "was: {}".format(self, formatted_tb)
             )
             self.status = self.FAILED
@@ -562,14 +605,21 @@ class OrderItem(CustomizableItem):
             self.additional_status_info = error_message
             raise
         else:
-            self.status = self.COMPLETED
-            self.additional_status_info = "Item processed successfully"
-            self.completed_on = dt.datetime.now(pytz.utc)
+            self._set_status(self.COMPLETED, "Item processed successfully")
             self.available = True
             self.expires_on = self._create_expiry_date()
         finally:
             self.save()
-        return processing_result
+        return url
+
+
+    def _set_status(self, status, additional_info=""):
+        self.status = status
+        self.additional_status_info = additional_info
+        if self.status == self.COMPLETED:
+            self.completed_on = dt.datetime.now(pytz.utc)
+        self.save()
+
 
     def save(self, *args, **kwargs):
         """Save instance into the database.

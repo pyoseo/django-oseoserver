@@ -137,8 +137,10 @@ def process_item(self, order_item_id, max_tries=3, sleep_interval=10):
 
     order_item = models.OrderItem.objects.get(pk=order_item_id)
     try:
-        order_item.process()
+        path = order_item.process()
+        url = order_item.deliver(path=path)
     except Exception as err:
+        logger.warning(err)
         self.retry(exc=err)
 
 
