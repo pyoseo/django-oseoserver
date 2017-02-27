@@ -16,21 +16,16 @@
 
 from __future__ import absolute_import
 import datetime as dt
-from decimal import Decimal
 import sys
 import traceback
 import logging
 
-import celery
 from django.db import models
 from django.conf import settings as django_settings
 from django.utils.encoding import python_2_unicode_compatible
 import pytz
-from pyxb import BIND
-import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from . import utilities
-from .utilities import _n
 
 logger = logging.getLogger(__name__)
 
@@ -50,22 +45,6 @@ class AbstractDeliveryAddress(models.Model):
 
     class Meta:
         abstract = True
-
-    def create_oseo_delivery_address(self):
-        delivery_address = oseo.DeliveryAddressType()
-        delivery_address.firstName = _n(self.first_name)
-        delivery_address.lastName = _n(self.last_name)
-        delivery_address.companyRef = _n(self.company_ref)
-        delivery_address.postalAddress = BIND()
-        delivery_address.postalAddress.streetAddress = _n(self.street_address)
-        delivery_address.postalAddress.city = _n(self.city)
-        delivery_address.postalAddress.state = _n(self.state)
-        delivery_address.postalAddress.postalCode = _n(self.postal_code)
-        delivery_address.postalAddress.country = _n(self.country)
-        delivery_address.postalAddress.postBox = _n(self.post_box)
-        delivery_address.telephoneNumber = _n(self.telephone)
-        delivery_address.facsimileTelephoneNumber = _n(self.fax)
-        return delivery_address
 
 
 @python_2_unicode_compatible
@@ -125,35 +104,6 @@ class CustomizableItem(models.Model):
     class Meta:
         abstract = True
 
-    def create_oseo_delivery_options(self):
-        """Create an OSEO DeliveryOptionsType"""
-
-        try:
-            do = self.selected_delivery_option
-        except SelectedDeliveryOption.DoesNotExist:
-            dot = None
-        else:
-            dot = oseo.DeliveryOptionsType()
-            if do.delivery_type == SelectedDeliveryOption.ONLINE_DATA_ACCESS:
-                dot.onlineDataAccess = BIND(protocol=do.delivery_details)
-            elif do.delivery_type == SelectedDeliveryOption.ONLINE_DATA_DELIVERY:
-                dot.onlineDataDelivery = BIND(
-                    protocol=do.delivery_details)
-            elif do.delivery_type == SelectedDeliveryOption.MEDIA_DELIVERY:
-                medium, _, shipping = do.delivery_details.partition(",")
-                dot.mediaDelivery = BIND(
-                    packageMedium=medium,
-                    shippingInstructions=_n(shipping)
-                )
-            else:
-                raise ValueError("Invalid delivery_type: "
-                                 "{}".format(do.delivery_type))
-            dot.numberOfCopies = _n(do.copies)
-            dot.productAnnotation = _n(do.annotation)
-            dot.specialInstructions = _n(do.special_instructions)
-        return dot
-
-
 @python_2_unicode_compatible
 class Extension(models.Model):
 
@@ -174,38 +124,6 @@ class DeliveryInformation(AbstractDeliveryAddress):
         blank=True,
         related_name="delivery_information"
     )
-
-    def create_oseo_delivery_information(self):
-        """Create an OSEO DeliveryInformationType"""
-        del_info = oseo.DeliveryInformationType()
-        optional_attrs = [self.first_name, self.last_name, self.company_ref,
-                          self.street_address, self.city, self.state,
-                          self.postal_code, self.country, self.post_box,
-                          self.telephone, self.fax]
-        if any(optional_attrs):
-            del_info.mailAddress = oseo.DeliveryAddressType()
-            del_info.mailAddress.firstName = _n(self.first_name)
-            del_info.mailAddress.lastName = _n(self.last_name)
-            del_info.mailAddress.companyRef = _n(self.company_ref)
-            del_info.mailAddress.postalAddress = BIND()
-            del_info.mailAddress.postalAddress.streetAddress = _n(
-                self.street_address)
-            del_info.mailAddress.postalAddress.city = _n(self.city)
-            del_info.mailAddress.postalAddress.state = _n(self.state)
-            del_info.mailAddress.postalAddress.postalCode = _n(
-                self.postal_code)
-            del_info.mailAddress.postalAddress.country = _n(self.country)
-            del_info.mailAddress.postalAddress.postBox = _n(self.post_box)
-            del_info.mailAddress.telephoneNumber = _n(self.telephone)
-            del_info.mailAddress.facsimileTelephoneNumber = _n(self.fax)
-        for oa in self.onlineaddress_set.all():
-            del_info.onlineAddress.append(oseo.OnlineAddressType())
-            del_info.onlineAddress[-1].protocol = oa.protocol
-            del_info.onlineAddress[-1].serverAddress = oa.server_address
-            del_info.onlineAddress[-1].userName = _n(oa.user_name)
-            del_info.onlineAddress[-1].userPassword = _n(oa.user_password)
-            del_info.onlineAddress[-1].path = _n(oa.path)
-        return del_info
 
 
 @python_2_unicode_compatible
@@ -316,50 +234,6 @@ class Order(CustomizableItem):
 
     def __str__(self):
         return '{0.order_type}, {0.id}, {0.reference!r}'.format(self)
-
-    def create_oseo_order_monitor(
-            self, presentation="brief"):
-        om = oseo.CommonOrderMonitorSpecification()
-        if self.order_type == self.MASSIVE_ORDER:
-            om.orderType = self.PRODUCT_ORDER
-            om.orderReference = self.MASSIVE_ORDER_REFERENCE
-        else:
-            om.orderType = self.order_type
-            om.orderReference = _n(self.reference)
-        om.orderId = str(self.id)
-        om.orderStatusInfo = oseo.StatusType(
-            status=self.status,
-            additionalStatusInfo=_n(self.additional_status_info),
-            missionSpecificStatusInfo=_n(self.mission_specific_status_info)
-        )
-        om.orderDateTime = self.status_changed_on
-        om.orderRemark = _n(self.remark)
-        try:
-            d = self.delivery_information.create_oseo_delivery_information()
-            om.deliveryInformation = d
-        except DeliveryInformation.DoesNotExist:
-            pass
-        try:
-            om.invoiceAddress = \
-                self.invoice_address.create_oseo_delivery_address()
-        except InvoiceAddress.DoesNotExist:
-            pass
-        om.packaging = _n(self.packaging)
-        # add any 'option' elements
-        om.deliveryOptions = self.create_oseo_delivery_options()
-        om.priority = _n(self.priority)
-        if presentation == "full":
-            if self.order_type == self.PRODUCT_ORDER:
-                batch = self.batches.get()
-                sits = batch.create_oseo_items_status()
-                om.orderItem.extend(sits)
-            elif self.order_type == self.SUBSCRIPTION_ORDER:
-                for batch in self.batches.all()[1:]:
-                    sits = batch.create_oseo_items_status()
-                    om.orderItem.extend(sits)
-            else:
-                raise NotImplementedError
-        return om
 
     def export_delivery_information(self):
         """Return a dictionary with the instance's delivery information.
@@ -475,33 +349,6 @@ class OrderItem(CustomizableItem):
 
     def __str__(self):
         return ("id: {0.id}, batch: {0.batch}".format(self))
-
-    def create_oseo_status_item_type(self):
-        """Create a CommonOrderStatusItemType element"""
-        sit = oseo.CommonOrderStatusItemType()
-        # TODO - add the other optional elements
-        sit.itemId = str(self.item_id)
-        # oi.identifier is guaranteed to be non empty for
-        # normal product orders and for subscription batches
-        sit.productId = self.identifier
-        sit.productOrderOptionsId = "Options for {} {}".format(
-            self.collection, self.batch.order.order_type)
-        sit.orderItemRemark = _n(self.remark)
-        collection_settings = utilities.get_collection_settings(
-            self.collection)
-        sit.collectionId = _n(collection_settings["collection_identifier"])
-        # add any 'option' elements that may be present
-        # add any 'sceneSelection' elements that may be present
-        sit.deliveryOptions = self.create_oseo_delivery_options()
-        # add any 'payment' elements that may be present
-        # add any 'extension' elements that may be present
-        sit.orderItemStatusInfo = oseo.StatusType()
-        sit.orderItemStatusInfo.status = self.status
-        sit.orderItemStatusInfo.additionalStatusInfo = \
-            _n(self.additional_status_info)
-        sit.orderItemStatusInfo.missionSpecificStatusInfo= \
-            _n(self.mission_specific_status_info)
-        return sit
 
     def export_delivery_options(self):
         """Return a dictionary with the instance's delivery options.
@@ -864,12 +711,6 @@ class Batch(models.Model):
                 self.order.completed_on = now
             self.order.save()
 
-    def create_oseo_items_status(self):
-        items_status = []
-        for i in self.order_items.all():
-            items_status.append(i.create_oseo_status_item_type())
-        return items_status
-
     def get_completed_items(self, behaviour):
         last_time = self.order.last_describe_result_access_request
         order_delivery = self.order.selected_delivery_option.delivery_type
@@ -881,19 +722,21 @@ class Batch(models.Model):
         else:
             batch_complete_items = []
             order_items = self.order_items.all()
-            for oi in order_items:
+            for item in order_items:
+                item_spec = item.item_specification
                 try:
-                    delivery = oi.selected_delivery_option.delivery_type
-                except SelectedDeliveryOption.DoesNotExist:
+                    delivery = (
+                        item_spec.selected_delivery_option.delivery_type)
+                except ItemSpecificationDeliveryOption.DoesNotExist:
                     delivery = order_delivery
-                if delivery != SelectedDeliveryOption.ONLINE_DATA_ACCESS:
+                if delivery != BaseDeliveryOption.ONLINE_DATA_ACCESS:
                     # getStatus only applies to items with onlinedataaccess
                     continue
-                if oi.status == CustomizableItem.COMPLETED:
+                if item.status == CustomizableItem.COMPLETED:
                     if (last_time is None or behaviour == self.ALL_READY) or \
                             (behaviour == self.NEXT_READY and
-                                     oi.completed_on >= last_time):
-                        batch_complete_items.append(oi)
+                                     item.completed_on >= last_time):
+                        batch_complete_items.append(item)
             if self.order.packaging == Order.ZIP:
                 if len(batch_complete_items) == len(order_items):
                     # the zip is ready, lets get only a single file

@@ -11,7 +11,7 @@ from oseoserver.operations import submit
 from oseoserver import models
 from oseoserver.models import Order
 from oseoserver.models import CustomizableItem
-from oseoserver.models import SelectedDeliveryOption
+from oseoserver.models import OrderDeliveryOption
 from oseoserver.utilities import _c
 
 pytestmark = pytest.mark.unit
@@ -323,12 +323,12 @@ def test_create_option_invalid_option(available, parseable, legal, choices,
 
 
 @pytest.mark.parametrize("protocol, delivery_type, order_type", [
-    ("phony1", SelectedDeliveryOption.ONLINE_DATA_ACCESS, Order.PRODUCT_ORDER),
-    ("phony2", SelectedDeliveryOption.ONLINE_DATA_DELIVERY,
+    ("phony1", OrderDeliveryOption.ONLINE_DATA_ACCESS, Order.PRODUCT_ORDER),
+    ("phony2", OrderDeliveryOption.ONLINE_DATA_DELIVERY,
      Order.PRODUCT_ORDER),
-    ("phony3", SelectedDeliveryOption.ONLINE_DATA_ACCESS,
+    ("phony3", OrderDeliveryOption.ONLINE_DATA_ACCESS,
      Order.SUBSCRIPTION_ORDER),
-    ("phony4", SelectedDeliveryOption.ONLINE_DATA_DELIVERY,
+    ("phony4", OrderDeliveryOption.ONLINE_DATA_DELIVERY,
      Order.SUBSCRIPTION_ORDER),
 ])
 def test_check_delivery_protocol_enabled(protocol, delivery_type, order_type):
@@ -363,12 +363,12 @@ def test_check_delivery_protocol_enabled(protocol, delivery_type, order_type):
 
 
 @pytest.mark.parametrize("protocol, delivery_type, order_type", [
-    ("phony1", SelectedDeliveryOption.ONLINE_DATA_ACCESS, Order.PRODUCT_ORDER),
-    ("phony2", SelectedDeliveryOption.ONLINE_DATA_DELIVERY,
+    ("phony1", OrderDeliveryOption.ONLINE_DATA_ACCESS, Order.PRODUCT_ORDER),
+    ("phony2", OrderDeliveryOption.ONLINE_DATA_DELIVERY,
      Order.PRODUCT_ORDER),
-    ("phony3", SelectedDeliveryOption.ONLINE_DATA_ACCESS,
+    ("phony3", OrderDeliveryOption.ONLINE_DATA_ACCESS,
      Order.SUBSCRIPTION_ORDER),
-    ("phony4", SelectedDeliveryOption.ONLINE_DATA_DELIVERY,
+    ("phony4", OrderDeliveryOption.ONLINE_DATA_DELIVERY,
      Order.SUBSCRIPTION_ORDER),
 ])
 def test_check_delivery_protocol_disabled(protocol, delivery_type, order_type):
@@ -407,8 +407,8 @@ def test_check_delivery_protocol_disabled(protocol, delivery_type, order_type):
                 shippingInstructions="other"
             )
         ),
-        models.SelectedDeliveryOption(
-            delivery_type=SelectedDeliveryOption.MEDIA_DELIVERY,
+        models.OrderDeliveryOption(
+            delivery_type=OrderDeliveryOption.MEDIA_DELIVERY,
             delivery_details="DVD, other",
             copies=1
         )
@@ -417,8 +417,8 @@ def test_check_delivery_protocol_disabled(protocol, delivery_type, order_type):
             oseo.DeliveryOptionsType(
                 onlineDataAccess=BIND(protocol="ftp")
             ),
-            models.SelectedDeliveryOption(
-                delivery_type=SelectedDeliveryOption.ONLINE_DATA_ACCESS,
+            models.OrderDeliveryOption(
+                delivery_type=OrderDeliveryOption.ONLINE_DATA_ACCESS,
                 delivery_details="ftp",
                 copies=1
             )
@@ -426,8 +426,8 @@ def test_check_delivery_protocol_disabled(protocol, delivery_type, order_type):
     (
             oseo.DeliveryOptionsType(
                 onlineDataDelivery=BIND(protocol="ftp")),
-            models.SelectedDeliveryOption(
-                delivery_type=SelectedDeliveryOption.ONLINE_DATA_DELIVERY,
+            models.OrderDeliveryOption(
+                delivery_type=OrderDeliveryOption.ONLINE_DATA_DELIVERY,
                 delivery_details="ftp",
                 copies=1
             )

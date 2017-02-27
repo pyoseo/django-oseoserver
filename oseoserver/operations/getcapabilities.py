@@ -1,4 +1,4 @@
-# Copyright 2015 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,9 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Implements the OSEO GetCapabilities operation
-"""
+"""Implements the OSEO GetCapabilities operation"""
 
 from __future__ import absolute_import
 import logging
@@ -53,7 +51,7 @@ def get_capabilities(request, user):
 
     # parse the GetCapabilities request
     # here we just provide a standard response
-    caps = oseo.Capabilities(version=requestprocessor.OseoServer.OSEO_VERSION)
+    caps = oseo.Capabilities(version=requestprocessor.OSEO_VERSION)
     caps.ServiceIdentification = build_service_identification()
     caps.ServiceProvider = build_service_provider()
     caps.OperationsMetadata = build_operations_metadata()
