@@ -70,7 +70,7 @@ class MySubscriptionBatchSerializer(serializers.BaseSerializer):
         except ValueError:
             raise ValidationError({"timeslot": "Invalid timeslot format"})
         collection = data.get("collection")
-        if collection not in (c["name"] for cin settings.get_collections()):
+        if collection not in (c["name"] for c in settings.get_collections()):
             raise ValidationError({"collection": "Invalid collection"})
         order_id = data.get("order")
         try:
