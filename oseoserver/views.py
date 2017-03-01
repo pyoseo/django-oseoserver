@@ -41,7 +41,7 @@ class SubscriptionBatchViewSet(viewsets.ReadOnlyModelViewSet):
     def clean(self, request, *args, **kwargs):
         batch = self.get_object()
         logger.debug("Would clean subscription "
-                     "batch {0.id}".format(subscription))
+                     "batch {0.id}".format(batch))
         return Response()
 
 
