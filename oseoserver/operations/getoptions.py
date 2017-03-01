@@ -1,4 +1,4 @@
-# Copyright 2014 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,9 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Implements the OSEO GetOptions operation
-"""
+"""Implements the OSEO GetOptions operation"""
 
 import logging
 
@@ -22,157 +20,109 @@ import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.swe_2_0 as swe
 
-from oseoserver import models
-from oseoserver import errors
+from ..models import Order
+from .. import settings
+from .. import utilities
 
 logger = logging.getLogger(__name__)
 
 
-# TODO - Implement retrieval of options for subscription orders
-def get_options(request, user, **kwargs):
-    """
-    Implements the OSEO GetOptions operation.
+def create_oseo_order_options(collection, order_type):
+    collection_config = utilities.get_collection_settings(
+        collection_id=collection)
+    order_options = oseo.CommonOrderOptionsType(
+        productOrderOptionsId=".".join((order_type,
+                                        collection_config["name"])),
+        description="Options for submitting orders of type {!r} for "
+                    "collection {!r} ".format(order_type, collection),
+        orderType=order_type
+    )
+    for option in collection_config[order_type.lower()]["options"]:
+        data_record = create_swe_data_record(option)
+        order_options.option.append(
+            pyxb.BIND(AbstractDataComponent=data_record))
+    delivery_options = order_options.productDeliveryOptions
+    data_access_options = settings.get_online_data_access_options()
+    if any(data_access_options):
+        delivery_options.append(pyxb.BIND(onlineDataAccess=pyxb.BIND()))
+        for data_access_option in data_access_options:
+            delivery_options[-1].onlineDataAccess.append(
+                oseo.ProtocolType(data_access_option["protocol"]))
+    data_delivery_options = settings.get_online_data_delivery_options()
+    if any(data_delivery_options):
+        delivery_options.append(pyxb.BIND(onlineDataDelivery=pyxb.BIND()))
+        for data_delivery_option in data_delivery_options:
+            delivery_options[-1].onlineDataDelivery.append(
+                oseo.ProtocolType(data_delivery_option["protocol"]))
+    media_delivery_options = settings.get_media_delivery_options()
+    if any(media_delivery_options["media"]):
+        delivery_options.append(pyxb.BIND(mediaDelivery=pyxb.BIND()))
+        for medium_options in media_delivery_options["media"]:
+            delivery_options[-1].mediaDelivery.append(
+                oseo.PackageMedium(medium_options["type"].value))
+    return order_options
 
 
-    :arg request: The instance with the request parameters
-    :type request: pyxb.bundles.opengis.raw.oseo.OrderOptionsRequestType
-    :arg user: User making the request
-    :type user: oseoserver.models.OseoUser
-    :return: The XML response object
-    :rtype: str
-    """
-
-    response = oseo.GetOptionsResponse(status="success")
-    if any(request.identifier):  # product identifier query
-        # retrieve the products from the catalogue using the identifier
-        # assess their collection and return the collection options
-        raise NotImplementedError
-    elif request.collectionId is not None:  # product or collection query
-        try:
-            collection = models.Collection.objects.get(
-                collection_id=request.collectionId)
-            product_order_options = create_oseo_order_options(
-                collection, user, models.Order.PRODUCT_ORDER)
-            subscription_order_options = create_oseo_order_options(
-                collection, user, models.Order.SUBSCRIPTION_ORDER)
-            for order_option in (product_order_options,
-                                 subscription_order_options):
-                if order_option is not None:
-                    response.orderOptions.append(order_option)
-        except models.Collection.DoesNotExist():
-            raise errors.UnsupportedCollectionError()
-    elif request.taskingRequestId is not None:
-        raise NotImplementedError
-    return response, None
-
-
-def create_oseo_order_options(collection, user, order_type_name):
-    valid, order_config = validate_collection_user(collection, user,
-                                                         order_type_name)
-    oo = None
-    if valid:
-        options_id = "{} {}".format(order_type_name, collection.name)
-        description = ("Options for submitting orders of type {} for "
-                       "the {} collection".format(order_type_name,
-                                                  collection.name))
-        oo = oseo.CommonOrderOptionsType(productOrderOptionsId=options_id,
-                                         description=description,
-                                         orderType=order_type_name)
-        for option in order_config.options.all():
-            data_record = create_swe_data_record(option)
-            oo.option.append(pyxb.BIND(AbstractDataComponent=data_record))
-        access, delivery, package = extract_delivery_options(
-            order_config)
-        if any(access):
-            create_delivery_options_element(oo, "online_data_access",
-                                                  access)
-        if any(delivery):
-            create_delivery_options_element(oo,
-                                                  "online_data_delivery",
-                                                  delivery)
-        if any(package):
-            create_delivery_options_element(oo, "media_delivery",
-                                                  package)
-    return oo
-
-
-def validate_collection_user(col, user, order_type_name):
-    """
-
-    :param col: the collection
-    :param user:
-    :param order_type_name:
-    :return:
-    """
-    group = user.oseo_group
-    oc = None
-    result = True
-    if not group.collection_set.filter(id=col.id).exists():
-        # the collection cannot be ordered by this user
-        result = False
-    if order_type_name == models.Order.PRODUCT_ORDER:
-        oc = col.productorderconfiguration.orderconfiguration_ptr
-        if not oc.enabled:
-            result = False
-    elif order_type_name == models.Order.SUBSCRIPTION_ORDER:
-        oc = col.subscriptionorderconfiguration.orderconfiguration_ptr
-        if not oc.enabled:
-            result = False
-    return result, oc
-
-
-def extract_delivery_options(order_configuration):
-    data_access = []
-    data_delivery = []
-    package_media = []
-    for del_opt in order_configuration.delivery_options.all():
-        try:
-            p = del_opt.onlinedataaccess.protocol
-            data_access.append(p)
-        except models.OnlineDataAccess.DoesNotExist:
-            try:
-                p = del_opt.onlinedatadelivery.protocol
-                data_delivery.append(p)
-            except models.OnlineDataDelivery.DoesNotExist:
-                m = del_opt.mediadelivery.package_medium
-                package_media.append(m)
-    return data_access, data_delivery, package_media
-
-
-def create_delivery_options_element(common_order_options_element,
-                                    delivery_option, contents):
-    p = common_order_options_element.productDeliveryOptions
-    if delivery_option == "online_data_access":
-        p.append(pyxb.BIND(onlineDataAccess=pyxb.BIND()))
-        for item in contents:
-            p[-1].onlineDataAccess.append(oseo.ProtocolType(item))
-    elif delivery_option == "online_data_delivery":
-        p.append(pyxb.BIND(onlineDataDelivery=pyxb.BIND()))
-        for item in contents:
-            p[-1].onlineDataDelivery.append(oseo.ProtocolType(item))
-    elif delivery_option == "media_delivery":
-        p.append(pyxb.BIND(mediaDelivery=pyxb.BIND()))
-        for item in contents:
-            p[-1].mediaDelivery.append(oseo.PackageMedium(item))
-
-
-def create_swe_data_record(option):
-    dr = swe.DataRecord()
-    dr.field.append(pyxb.BIND())
-    dr.field[0].name = option.name
-    cat = swe.Category(updatable=False)
-    cat.optional = True
+def create_swe_data_record(option_name):
+    option_config = utilities.get_processing_option_settings(option_name)
+    data_record = swe.DataRecord()
+    data_record.field.append(pyxb.BIND())
+    data_record.field[0].name = option_name
+    category = swe.Category(updatable=False)
+    category.optional = True
     #cat.definition = 'http://geoland2.meteo.pt/ordering/def/%s' % \
     #        option.name
     #cat.identifier = option.name
     #cat.description = _n(option.description)
-    choices = option.choices.all()
+    choices = option_config.get("choices", [])
     if any(choices):
-        cat.constraint = pyxb.BIND()
-        at = swe.AllowedTokens()
+        category.constraint = pyxb.BIND()
+        allowed_tokens = swe.AllowedTokens()
         for choice in choices:
-            at.value_.append(choice.value)
-        cat.constraint.append(at)
-    dr.field[0].append(cat)
-    return dr
+            allowed_tokens.value_.append(choice)
+        category.constraint.append(allowed_tokens)
+    data_record.field[0].append(category)
+    return data_record
+
+
+# TODO - Implement retrieval of options for subscription orders
+def get_options(request, user):
+    """Implements the OSEO GetOptions operation.
+
+    Parameters
+    ----------
+    request: pyxb.bundles.opengis.raw.oseo.OrderOptionsRequestType
+        The instance with the request parameters
+    user: django.contrib.auth.models.User
+        User making the request
+
+    Returns
+    -------
+    oseo.GetOptionsResponse:
+        The response object
+
+    """
+
+    response = oseo.GetOptionsResponse(status="success")
+    if request.collectionId is not None:
+        product_order_options = create_oseo_order_options(
+            collection=request.collectionId,
+            order_type=Order.PRODUCT_ORDER
+        )
+        subscription_order_options = create_oseo_order_options(
+            collection=request.collectionId,
+            order_type=Order.SUBSCRIPTION_ORDER
+        )
+        for order_option in (product_order_options,
+                             subscription_order_options):
+            if order_option is not None:
+                response.orderOptions.append(order_option)
+    elif any(request.identifier):
+        # retrieve the products from the catalogue using the identifier
+        # assess their collection and return the collection options
+        raise NotImplementedError
+    else:  # tasking request id
+        raise NotImplementedError
+    return response
+
 

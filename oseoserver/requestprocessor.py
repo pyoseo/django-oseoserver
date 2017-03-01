@@ -80,6 +80,21 @@ OPERATION_CALLABLES = {
 }
 
 
+def cancel_order(order, notify=False,
+                 notification_details="User has cancelled the order"):
+    order.status = CustomizableItem.CANCELLED
+    order.additional_status_info = notification_details
+    order.save()
+    if notify:
+        mail_recipients = get_user_model().objects.filter(
+            Q(oseoserver_order_orders__id=order.id) | Q(is_staff=True)
+        ).exclude(email="").distinct("email")
+        mailsender.send_order_cancelled_email(
+            order=order,
+            recipients=mail_recipients
+        )
+
+
 def create_exception_report(code, text, locator=None):
     """Generate an ExceptionReport
 
@@ -116,6 +131,10 @@ def create_exception_report(code, text, locator=None):
 
 @transaction.atomic()
 def create_massive_order_batch(order, batch_index=0):
+    if order.status == Order.CANCELLED:
+        logger.error("Order {} has a {} status. Cannot create new "
+                     "batches".format(order, order.status))
+        raise errors.InvalidOrderIdentifierError()
     processor = utilities.get_item_processor(order.order_type)
     all_identifiers = []
     for item_specification in order.item_specifications.all():
@@ -171,9 +190,17 @@ def create_product_order_batch(order):
     return batch
 
 
-# TODO - TRY TO FIND THE BATCH BEFORE CREATING IT
 @transaction.atomic()
 def create_subscription_batch(order, timeslot, collection):
+    if order.status == Order.CANCELLED:
+        logger.error("Order {} has a {} status. Cannot create new "
+                     "batches".format(order, order.status))
+        raise errors.InvalidOrderIdentifierError()
+    previous_batch = find_subscription_batch(order, timeslot, collection)
+    if previous_batch:
+        logger.debug("Deleting previously existing batch for the same "
+                     "timeslot and collection - {}...".format(previous_batch))
+        previous_batch.delete()
     batch = models.Batch(
         order=order,
         status=order.status,
@@ -198,6 +225,26 @@ def create_subscription_batch(order, timeslot, collection):
 @transaction.atomic()
 def create_tasking_order_batch():
     raise NotImplementedError
+
+
+def find_subscription_batch(order, timeslot, collection):
+    processor = utilities.get_item_processor(order.order_type)
+    item_identifier = processor.get_subscription_item_identifier(
+        timeslot, collection)
+    try:
+        existing_order_item = models.OrderItem.objects.get(
+            identifier=item_identifier,
+            batch__order=order
+        )
+        existing_batch = existing_order_item.batch
+        logger.debug("Found a previous batch in order {!r} for {!r} {!r} - "
+                     "batch {}".format(order, timeslot, collection,
+                                       existing_batch))
+    except models.OrderItem.DoesNotExist:
+        logger.debug("Could not find a previous batch in order {!r} for "
+                     "{!r} {!r}".format(order, timeslot, collection))
+        existing_batch = None
+    return existing_batch
 
 
 def get_operation(request):

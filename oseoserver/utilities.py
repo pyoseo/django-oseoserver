@@ -140,6 +140,33 @@ def get_item_processor(order_type):
     return processor
 
 
+def get_processing_option_settings(option_name):
+    processing_options = settings.get_processing_options()
+    option_settings = [
+        opt for opt in processing_options if opt["name"] == option_name][0]
+    return option_settings
+
+
+def get_collection_settings(collection_id):
+    for collection_config in settings.get_collections():
+        if collection_config["collection_identifier"] == collection_id:
+            result = collection_config
+            break
+    else:
+        raise errors.UnsupportedCollectionError()
+    return result
+
+
+def get_collection_identifier(name):
+    all_collections = settings.get_collections()
+    try:
+        config = [c for c in all_collections if c["name"] == name][0]
+        identifier = config["collection_identifier"]
+    except IndexError:
+        identifier = ""
+    return identifier
+
+
 def _c(value):
     """
     Convert between a None and an empty string.

@@ -15,12 +15,13 @@
 """Implements the OSEO Submit operation"""
 
 from __future__ import absolute_import
+import datetime as dt
 import logging
-from math import ceil
 
 from django.db import transaction
-import pyxb.bundles.opengis.oseo_1_0 as oseo
 from lxml import etree
+import pyxb.bundles.opengis.oseo_1_0 as oseo
+import pytz
 
 from .. import models
 from .. import errors
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def check_collection_enabled(collection_id, order_type):
-    collection_settings = get_collection_settings(collection_id)
+    collection_settings = utilities.get_collection_settings(collection_id)
     try:
         enabled = collection_settings[order_type.lower()]["enabled"]
     except KeyError:
@@ -419,17 +420,6 @@ def create_order_item(status, item_id, collection,
     return item
 
 
-def get_collection_settings(collection_id):
-    for collection_config in settings.get_collections():
-        if collection_config["collection_identifier"] == collection_id:
-            result = collection_config
-            break
-    else:
-        raise errors.OseoServerError(
-            "Invalid collection identifier: {!r}".format(collection_id))
-    return result
-
-
 def get_order_initial_status(order_type):
     initial_status = _get_initial_status(order_type)
     additional_status_info = {
@@ -628,6 +618,7 @@ def process_request_order_specification(order_specification, user,
                 option.save()
                 order.selected_options.add(option)
     logger.debug("Extracted order options")
+    validate_order_type_specific_constraints(order)
     order.full_clean()
     validate_order_size(order, item_processor)
     logger.debug("Validated order size")
@@ -703,7 +694,7 @@ def validate_order_delivery_options(order):
     """
 
     try:
-        order_delivery = order.selected_delivery_option
+        order.selected_delivery_option
     except models.OrderDeliveryOption.DoesNotExist:
         logger.warning(
             "Order {!r} does not specify any delivery options. Inspecting "
@@ -711,13 +702,36 @@ def validate_order_delivery_options(order):
         )
         for item_specification in order.item_specifications.all():
             try:
-                item_delivery = item_specification.selected_delivery_option
+                item_specification.selected_delivery_option
             except models.ItemSpecificationDeliveryOption.DoesNotExist:
                 logger.error(
                     "Item {!r} does not specify delivery options. Cannot "
                     "deliver such an item".format(item_specification)
                 )
                 raise
+
+
+def validate_order_type_specific_constraints(order):
+    if order.order_type == Order.SUBSCRIPTION_ORDER:
+        _validate_subscription_date_range(order)
+
+
+def _create_default_date_range_option(date_range_name, item_processor):
+    start = dt.datetime.now(pytz.utc)
+    end = start + dt.timedelta(days=365)
+    option_element = etree.Element(date_range_name)
+    option_element.text = " ".join((
+        start.isoformat(),
+        end.isoformat()
+    ))
+    option_value = item_processor.parse_option(
+        name=date_range_name,
+        value=option_element
+    )
+    return models.SelectedOrderOption(
+        option=date_range_name,
+        value=option_value
+    )
 
 
 def _get_delivery_address(delivery_address_type):
@@ -813,3 +827,34 @@ def _validate_order_number_of_items(order_items, order_type):
         )
         logger.error(error_msg)
         raise errors.NoApplicableCodeError
+
+
+def _validate_subscription_date_range(order):
+    date_range_name = "DateRange"
+    try:
+        models.SelectedOrderOption.objects.get(
+            option=date_range_name, order=order)
+    except models.SelectedOrderOption.DoesNotExist:
+        logger.debug(
+            "Could not find a {!r} option on the order, looking in item "
+            "specifications...".format(date_range_name)
+        )
+        for item_spec in models.ItemSpecification.objects.filter(order=order):
+            try:
+                item_spec.selected_options.get(option=date_range_name)
+            except models.SelectedItemOption.DoesNotExist:
+                logger.warning(
+                    "There is at least one item specification without a "
+                    "{!r} option. Setting a default option in the "
+                    "order".format(date_range_name)
+                )
+                default_date_range = _create_default_date_range_option(
+                    date_range_name=date_range_name,
+                    item_processor=utilities.get_item_processor(
+                        order.order_type)
+                )
+                default_date_range.order = order
+                default_date_range.save()
+                break
+
+

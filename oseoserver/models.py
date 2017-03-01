@@ -711,43 +711,6 @@ class Batch(models.Model):
                 self.order.completed_on = now
             self.order.save()
 
-    def get_completed_items(self, behaviour):
-        last_time = self.order.last_describe_result_access_request
-        order_delivery = self.order.selected_delivery_option.delivery_type
-        completed = []
-        if self.status != CustomizableItem.COMPLETED:
-            # batch is either still being processed,
-            # failed or already downloaded, so we don't care for it
-            pass
-        else:
-            batch_complete_items = []
-            order_items = self.order_items.all()
-            for item in order_items:
-                item_spec = item.item_specification
-                try:
-                    delivery = (
-                        item_spec.selected_delivery_option.delivery_type)
-                except ItemSpecificationDeliveryOption.DoesNotExist:
-                    delivery = order_delivery
-                if delivery != BaseDeliveryOption.ONLINE_DATA_ACCESS:
-                    # getStatus only applies to items with onlinedataaccess
-                    continue
-                if item.status == CustomizableItem.COMPLETED:
-                    if (last_time is None or behaviour == self.ALL_READY) or \
-                            (behaviour == self.NEXT_READY and
-                                     item.completed_on >= last_time):
-                        batch_complete_items.append(item)
-            if self.order.packaging == Order.ZIP:
-                if len(batch_complete_items) == len(order_items):
-                    # the zip is ready, lets get only a single file
-                    # because they all point to the same URL
-                    completed.append(batch_complete_items[0])
-                else:  # the zip is not ready yet
-                    pass
-            else:  # lets get each file that is complete
-                completed = batch_complete_items
-        return completed
-
     def _get_massive_order_status(self):
         existing_batch_statuses = self.order.batches.values_list(
             "status", flat=True).distinct()

@@ -24,8 +24,8 @@ import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from .. import models
 from .. import errors
+from .. import utilities
 from ..utilities import _n
-from .. import settings
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ def create_oseo_delivery_options(instance):
 def create_oseo_items_status(batch):
     items_status = []
     for item in batch.order_items.all():
-        collection_id = _get_collection_identifier(
+        collection_id = utilities.get_collection_identifier(
             item.item_specification.collection)
         status_item = oseo.CommonOrderStatusItemType(
             itemId=str(item.item_specification.item_id),
@@ -172,16 +172,6 @@ def create_oseo_items_status(batch):
         # add any 'extension' elements that may be present
         items_status.append(status_item)
     return items_status
-
-
-def _get_collection_identifier(name):
-    all_collections = settings.get_collections()
-    try:
-        config = [c for c in all_collections if c["name"] == name][0]
-        identifier = config["collection_identifier"]
-    except IndexError:
-        identifier = ""
-    return identifier
 
 
 

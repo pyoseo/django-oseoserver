@@ -1,4 +1,4 @@
-# Copyright 2015 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -11,23 +11,21 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Implements the OSEO DescribeResultAccess operation
-"""
+"""Implements the OSEO DescribeResultAccess operation"""
 
 from __future__ import absolute_import
 import logging
 import datetime as dt
 
 from django.core.exceptions import ObjectDoesNotExist
+import pytz
 import pyxb
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 
 from .. import errors
 from .. import models
-from ..utilities import get_collection_settings
-from ..constants import OrderType
-from ..constants import Packaging
+from ..models import Order
+from .. import utilities
 
 logger = logging.getLogger(__name__)
 
@@ -56,31 +54,28 @@ def describe_result_access(request, user):
     """
 
     try:
-        order = models.Order.objects.get(id=request.orderId)
+        order = Order.objects.get(id=request.orderId)
     except ObjectDoesNotExist:
         raise errors.InvalidOrderIdentifierError()
-    # TODO: Authorization should be handled by Django instead
     if order.user != user:
         raise errors.AuthorizationFailedError
     completed_items = get_order_completed_items(order, request.subFunction)
-    logger.debug('completed_items: {}'.format(completed_items))
-    order.last_describe_result_access_request = dt.datetime.utcnow()
+    logger.debug("completed_items: {}".format(completed_items))
+    order.last_describe_result_access_request = dt.datetime.now(pytz.utc)
     order.save()
     response = oseo.DescribeResultAccessResponse(status='success')
 
     item_id = None
-    if (len(completed_items) == 1 and
-                order.packaging == Packaging.ZIP.value):
+    if (len(completed_items) == 1 and order.packaging == Order.ZIP):
         item_id = "Packaged order items"
     for item in completed_items:
         iut = oseo.ItemURLType()
-        iut.itemId = item_id if item_id is not None else item.item_id
+        iut.itemId = item_id or item.item_specification.item_id
         iut.productId = oseo.ProductIdType(
             identifier=item.identifier,
             )
-        collection_settings = get_collection_settings(item.collection)
-        iut.productId.collectionId = collection_settings[
-            "collection_identifier"]
+        iut.productId.collectionId = utilities.get_collection_identifier(
+            item.item_specification.collection)
         iut.itemAddress = oseo.OnLineAccessAddressType()
         iut.itemAddress.ResourceAddress = pyxb.BIND()
         iut.itemAddress.ResourceAddress.URL = item.url
@@ -90,8 +85,7 @@ def describe_result_access(request, user):
 
 
 def get_order_completed_items(order, behaviour):
-    """
-    Get the completed order items for product orders.
+    """Get the completed order items for product orders.
 
     Parameters
     ----------
@@ -108,14 +102,47 @@ def get_order_completed_items(order, behaviour):
 
     """
 
-    batches = []
-    if order.order_type == OrderType.PRODUCT_ORDER.value:
-        batches = order.batches.all()
-    elif order.order_type == OrderType.SUBSCRIPTION_ORDER.value:
-        batches = order.batches.all()[1:]
+    batches = order.batches.all()
     all_complete = []
-    for b in batches:
-        #batch_complete = self.get_batch_completed_files(b, behaviour)
-        batch_complete = b.get_completed_items(behaviour)
-        all_complete.extend(batch_complete)
+    for batch in batches:
+        complete_items = get_batch_completed_items(batch, behaviour)
+        all_complete.extend(complete_items)
     return all_complete
+
+
+def get_batch_completed_items(batch, behaviour):
+    last_time = batch.order.last_describe_result_access_request
+    list_all_items = last_time is None or behaviour == batch.ALL_READY
+    order_delivery = batch.order.selected_delivery_option.delivery_type
+    completed = []
+    if batch.status == Order.COMPLETED:
+        batch_complete_items = []
+        for item in batch.order_items.all():
+            item_spec = item.item_specification
+            try:
+                delivery = (
+                    item_spec.selected_delivery_option.delivery_type)
+            except models.ItemSpecificationDeliveryOption.DoesNotExist:
+                delivery = order_delivery
+            if delivery != models.BaseDeliveryOption.ONLINE_DATA_ACCESS:
+                # describeResultAccess only applies to items that specify
+                # 'onlinedataaccess' as delivery type
+                logger.debug(
+                    "item {} does not specify onlinedataaccess as its "
+                    "delivery type, skipping item...".format(item)
+                )
+                continue
+            completed_since_last = (item.completed_on is None or
+                                    last_time is None or
+                                    item.completed_on >= last_time)
+            list_this_item = (
+                behaviour == batch.NEXT_READY and completed_since_last)
+            if list_all_items or list_this_item:
+                batch_complete_items.append(item)
+        if batch.order.packaging == Order.ZIP:
+            completed.append(batch_complete_items[0])
+        else:  # lets get each file that is complete
+            completed = batch_complete_items
+    else:
+        logger.debug("batch {} is not complete".format(batch))
+    return completed

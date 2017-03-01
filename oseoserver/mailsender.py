@@ -83,6 +83,19 @@ def send_batch_packaging_failed_email(batch, error):
     )
 
 
+def send_order_cancelled_email(order, recipients):
+    template = "order_cancelled.html"
+    context = {
+        "order_type": order.order_type,
+        "reference": order.reference,
+        "details": order.additional_status_info,
+    }
+    subject = ("Copernicus Global Land Service - {0.order_type} {0.reference} "
+               "has been cancelled".format(order))
+    msg = render_to_string(template, context)
+    send_email(subject, msg, recipients, html=True)
+
+
 def send_subscription_moderated_email(order, approved, recipients):
     """Notify recipients via e-mail that subscription has been moderated.
 
