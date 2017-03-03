@@ -16,12 +16,24 @@ def order_change_form_link(instance):
 order_change_form_link.short_description = "Order"
 
 
+def batch_order_change_form_link(instance):
+    order = instance.order
+    change_form_url = reverse("admin:oseoserver_order_change",
+                              args=(order.id,))
+    return format_html(
+        '<a href="{}">{} {}</a>', change_form_url, order.order_type, order.id)
+batch_order_change_form_link.short_description = "Order"
+
+
 def delivery_information_change_form_link(instance):
     if instance.id is not None:
         change_form_url = reverse(
             "admin:oseoserver_deliveryinformation_change", args=(instance.id,))
         result = format_html(
-            '<a href="{}">{}</a>', change_form_url, instance.id)
+            '<a href="{}">Delivery information {}</a>',
+            change_form_url,
+            instance.id
+        )
     else:
         result = "Order does not specify any delivery information"
     return result
@@ -36,6 +48,11 @@ def item_specification_change_form_link(instance):
     return result
 item_specification_change_form_link.short_description = (
     "Details")
+
+
+class OrderItemInline(admin.StackedInline):
+    model = models.OrderItem
+    extra = 0
 
 
 class OnlineAddressInline(admin.StackedInline):
@@ -90,6 +107,26 @@ class ItemSpecificationInline(admin.StackedInline):
     )
     readonly_fields = (
         item_specification_change_form_link,
+    )
+
+
+@admin.register(models.Batch)
+class BatchAdmin(admin.ModelAdmin):
+    inlines = (
+        OrderItemInline,
+    )
+    list_display = (
+        "id",
+        "order",
+        "status",
+    )
+    fields = (
+        batch_order_change_form_link,
+        "status",
+    )
+    readonly_fields = (
+        batch_order_change_form_link,
+        "status",
     )
 
 
