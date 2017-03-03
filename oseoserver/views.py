@@ -1,13 +1,17 @@
 from __future__ import absolute_import
 import logging
 
+import celery
 from django.http import HttpResponse
 from django.http import HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from lxml import etree
 from rest_framework import viewsets
 from rest_framework.decorators import detail_route
+from rest_framework.decorators import list_route
 from rest_framework.response import Response
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.permissions import IsAdminUser
 
 from .constants import ENCODING
 from . import errors
@@ -43,6 +47,50 @@ class SubscriptionBatchViewSet(viewsets.ReadOnlyModelViewSet):
         logger.debug("Would clean subscription "
                      "batch {0.id}".format(batch))
         return Response()
+
+    @list_route(methods=["POST",],
+                authentication_classes=(TokenAuthentication,),
+                permission_classes=(IsAdminUser,))
+    def process_timeslot(self, request):
+        """Create new subscription batches and process them.
+
+        Request parameters:
+
+        timeslot: str
+            The timeslot to process
+        collection: str
+            The collection to process
+        force_creation:bool, optional
+            Whether a batch should be created even if it already exists
+
+        """
+
+        serializer = serializers.SubscriptionProcessTimeslotSerializer(
+            data=request.data)
+        serializer.is_valid(raise_exception=True)
+        queryset = models.Order.objects.filter(
+            order_type=models.Order.SUBSCRIPTION_ORDER
+        ).exclude(status__in=[
+            models.Order.SUBMITTED,  # these haven't been moderated yet
+            models.Order.CANCELLED,
+            models.Order.TERMINATED
+        ])
+        new_batches = []
+        for order in queryset:
+            batch, created = requestprocessor.create_subscription_batch(
+                order=order,
+                collection=serializer.validated_data.get("collection"),
+                timeslot=serializer.validated_data.get("timeslot"),
+                force_creation=serializer.validated_data.get("force_creation")
+            )
+            if created:
+                logger.info(
+                    "Sending batch {!r} to processing queue...".format(batch))
+                celery.current_app.send_task(
+                    "oseoserver.tasks.process_batch", (batch.id,))
+            new_batches.append(batch)
+        response_serializer = self.get_serializer(new_batches, many=True)
+        return Response(response_serializer.data)
 
 
 # TODO: Add authorization controls

@@ -1,11 +1,11 @@
+from collections import namedtuple
+
 import dateutil.parser
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
 from . import models
-from . import requestprocessor
 from . import settings
-from . import utilities
 
 
 class SubscriptionOrderSerializer(serializers.ModelSerializer):
@@ -35,11 +35,34 @@ class SubscriptionOrderSerializer(serializers.ModelSerializer):
         )
 
 
+class SubscriptionProcessTimeslotSerializer(serializers.BaseSerializer):
+
+    def to_internal_value(self, data):
+        try:
+            timeslot = dateutil.parser.parse(data.get("timeslot"))
+        except ValueError:
+            raise ValidationError({"timeslot": "Invalid timeslot format"})
+        except TypeError:
+            raise ValidationError({"timeslot": "This field is required"})
+        collection = data.get("collection")
+        if collection is None:
+            raise ValidationError({"collection": "This field is required"})
+        elif collection not in (c["name"] for c in settings.get_collections()):
+            raise ValidationError({"collection": "Invalid collection"})
+        force_creation = data.get("force_creation", False)
+        return {
+            "timeslot": timeslot,
+            "collection": collection,
+            "force_creation": force_creation,
+        }
+
+
 class SubscriptionBatchSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.Batch
         fields = (
+            "id",
             "order",
             "completed_on",
             "updated_on",
@@ -47,52 +70,9 @@ class SubscriptionBatchSerializer(serializers.ModelSerializer):
             "additional_status_info",
         )
         read_only_fields = (
+            "id",
             "completed_on",
             "updated_on",
             "status",
             "additional_status_info",
         )
-
-
-class MySubscriptionBatchSerializer(serializers.BaseSerializer):
-    # define fields here
-
-    def create(self, validated_data):
-        return requestprocessor.create_subscription_batch(
-            order=validated_data["order"],
-            timeslot=validated_data["timeslot"],
-            collection=validated_data["collection"]
-        )
-
-    def to_internal_value(self, data):
-        try:
-            timeslot = dateutil.parser.parse(data.get("timeslot"))
-        except ValueError:
-            raise ValidationError({"timeslot": "Invalid timeslot format"})
-        collection = data.get("collection")
-        if collection not in (c["name"] for c in settings.get_collections()):
-            raise ValidationError({"collection": "Invalid collection"})
-        order_id = data.get("order")
-        try:
-            order = models.Order.objects.get(pk=order_id)
-        except models.Order.DoesNotExist:
-            raise ValidationError({"order": "Invalid order identifier"})
-        return {
-            "timeslot": timeslot,
-            "collection": collection,
-            "order": order,
-        }
-
-    def to_representation(self, instance):
-        order = instance.order
-        item = instance.order_items.get()
-        processor = utilities.get_item_processor(order.order_type)
-
-        parsed_identifier = processor.collection_manager.parse_item_identifier(
-            item.identifier)
-        collection, timeslot = parsed_identifier
-        return {
-            "order": order.id,
-            "collection": collection,
-            "timeslot": timeslot.iso_format(),
-        }

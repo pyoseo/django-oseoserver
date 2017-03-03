@@ -96,6 +96,26 @@ def send_order_cancelled_email(order, recipients):
     send_email(subject, msg, recipients, html=True)
 
 
+def send_subscription_terminated_email(order, recipients):
+    """Notify recipients via e-mail that subscription has been terminated.
+
+    Parameters
+    ----------
+    order: oseoserver.models.Order
+        The subscription order that has been moderated
+    recipients: list
+        An iterable with the e-mail addresses to be notified
+    """
+    template = "subscription_terminated.html"
+    context = {
+        "order": order,
+    }
+    subject = (
+        "Copernicus Global Land Service - Subscription has been terminated")
+    msg = render_to_string(template, context)
+    send_email(subject, msg, recipients, html=True)
+
+
 def send_subscription_moderated_email(order, approved, recipients):
     """Notify recipients via e-mail that subscription has been moderated.
 
@@ -123,8 +143,8 @@ def send_subscription_moderated_email(order, approved, recipients):
         "approved": approved,
         "item_availability_days": item_availability_days,
     }
-    subject = "Copernicus Global Land Service - Subscription has " \
-              "been {}".format("accepted" if approved else "rejected")
+    subject = ("Copernicus Global Land Service - Subscription has "
+        "been {}".format("accepted" if approved else "rejected"))
     msg = render_to_string(template, context)
     send_email(subject, msg, recipients, html=True)
 

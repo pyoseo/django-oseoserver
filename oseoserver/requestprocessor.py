@@ -86,12 +86,24 @@ def cancel_order(order, notify=False,
     order.additional_status_info = notification_details
     order.save()
     if notify:
-        mail_recipients = get_user_model().objects.filter(
-            Q(oseoserver_order_orders__id=order.id) | Q(is_staff=True)
-        ).exclude(email="").distinct("email")
-        mailsender.send_order_cancelled_email(
+        _notify_order_stakeholders(
             order=order,
-            recipients=mail_recipients
+            notification_function=mailsender.send_order_cancelled_email,
+        )
+
+
+def terminate_subscription(subscription, notify=True,
+                           notification_details=None):
+    subscription.status = CustomizableItem.TERMINATED
+    subscription.additional_status_info = (
+        notification_details or "Subscription {0.id has been "
+                                "terminated".format(subscription)
+    )
+    subscription.save()
+    if notify:
+        _notify_order_stakeholders(
+            subscription,
+            mailsender.send_subscription_terminated_email,
         )
 
 
@@ -191,35 +203,79 @@ def create_product_order_batch(order):
 
 
 @transaction.atomic()
-def create_subscription_batch(order, timeslot, collection):
-    if order.status == Order.CANCELLED:
-        logger.error("Order {} has a {} status. Cannot create new "
-                     "batches".format(order, order.status))
+def create_subscription_batch(order, timeslot, collection,
+                              force_creation=False):
+    """Create a new batch for a subscription order.
+
+    This method will only create a new batch if the order's status allows it.
+    Cancelled, terminated and submitted orders cannot have new batches created.
+
+    A batch is created but it is not dispatched to the processing queue. The
+    caller of this method is responsible for dispatching it, if needed.
+
+    Parameters
+    ----------
+    order: models.Order
+        Order for which a new batch is to be created.
+    timeslot: datetime.datetime
+        Timeslot of the subscription batch
+    collection: str
+        Collection to process
+    force_creation: bool, optional
+        Whether a new batch should be created even if it already exists
+
+    Returns
+    -------
+    batch: models.Batch
+        The subscription batch
+    created: bool
+        Whether the batch has been created or not
+
+    """
+
+    if order.status in (Order.SUBMITTED,
+                        Order.CANCELLED,
+                        Order.TERMINATED):
+        logger.error("Order {!r} has a {!r} status. Cannot create new "
+                     "batches".format(order.id, order.status))
         raise errors.InvalidOrderIdentifierError()
     previous_batch = find_subscription_batch(order, timeslot, collection)
+    result = None
+    created = False
     if previous_batch:
-        logger.debug("Deleting previously existing batch for the same "
-                     "timeslot and collection - {}...".format(previous_batch))
-        previous_batch.delete()
-    batch = models.Batch(
-        order=order,
-        status=order.status,
-        additional_status_info=order.additional_status_info
-    )
-    batch.full_clean()
-    batch.save()
-    processor = utilities.get_item_processor(order.order_type)
-    for item_spec in order.item_specifications.filter(collection=collection):
-        identifier = processor.get_subscription_item_identifier(
-            timeslot, collection)
-        order_item = models.OrderItem(
-            item_specification=item_spec,
-            batch=batch,
-            identifier=identifier,
+        logger.debug(
+            "Found a previously existing batch for the same timeslot and "
+            "collection: {!r}".format(previous_batch.id)
         )
-        order_item.full_clean()
-        order_item.save()
-    return batch
+        if force_creation:
+            logger.debug("Deleting previously existing batch...")
+            previous_batch.delete()
+        else:
+            result = previous_batch
+    if result is None:
+        batch = models.Batch(
+            order=order,
+            status=order.status,
+            additional_status_info="timeslot:{!r} collection:{!r}".format(
+                timeslot, collection)
+        )
+        batch.full_clean()
+        batch.save()
+        processor = utilities.get_item_processor(order.order_type)
+        for item_spec in order.item_specifications.filter(
+                collection=collection):
+            identifier = processor.get_subscription_item_identifier(
+                timeslot, collection)
+            order_item = models.OrderItem(
+                item_specification=item_spec,
+                batch=batch,
+                identifier=identifier,
+            )
+            order_item.full_clean()
+            order_item.save()
+        result = batch
+        created = True
+    return result, created
 
 
 @transaction.atomic()
@@ -237,9 +293,6 @@ def find_subscription_batch(order, timeslot, collection):
             batch__order=order
         )
         existing_batch = existing_order_item.batch
-        logger.debug("Found a previous batch in order {!r} for {!r} {!r} - "
-                     "batch {}".format(order, timeslot, collection,
-                                       existing_batch))
     except models.OrderItem.DoesNotExist:
         logger.debug("Could not find a previous batch in order {!r} for "
                      "{!r} {!r}".format(order, timeslot, collection))
@@ -348,18 +401,16 @@ def handle_submit(order, approved, notify=False):
             "Order request has been rejected by the administrators")
     order.save()
     if notify:
-        mail_recipients = get_user_model().objects.filter(
-            Q(oseoserver_order_orders__id=order.id) | Q(is_staff=True)
-        ).exclude(email="").distinct("email")
         mail_func = {
             Order.PRODUCT_ORDER: mailsender.send_product_order_moderated_email,
             Order.SUBSCRIPTION_ORDER: (
                 mailsender.send_subscription_moderated_email)
         }[order.order_type]
-        mail_func(
+
+        _notify_order_stakeholders(
             order=order,
-            approved=approved,
-            recipients=mail_recipients
+            notification_function=mail_func,
+            approved=approved
         )
     return approved
 
@@ -480,3 +531,16 @@ def process_request(request_data, user):
     response_element = etree.fromstring(response.toxml(
         encoding=ENCODING), parser=utilities.get_etree_parser())
     return response_element
+
+
+def _notify_order_stakeholders(order, notification_function, **kwargs):
+    mail_recipients = get_user_model().objects.filter(
+        Q(oseoserver_order_orders__id=order.pk) | Q(is_staff=True)
+    ).exclude(email="").distinct("email")
+    notification_function(
+        order=order,
+        recipients=mail_recipients,
+        **kwargs
+    )
+
+
