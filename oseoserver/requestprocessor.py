@@ -41,6 +41,15 @@ result, status_code, response_headers = s.process_request(request)
 #  pd.values.append(pyoseo_schema.fileFormat('o valor'))
 #  pd.values.append(pyoseo_schema.projection('a projeccao'))
 #  pd.toxml()
+#
+#
+# * Sending files to be made available via onlinedataaccess with http protocol:
+#
+#   http -f POST localhost:8000/api/orderedfiles/ "Authorization: Token <the_token>" data@/path/to/file order_item=1
+#
+# * Deleting the previsouly sent file:
+#
+#   http DELETE localhost:8000/api/orderedfiles/<id> "Authorization: Token <the_token>"
 
 from __future__ import absolute_import
 import importlib
