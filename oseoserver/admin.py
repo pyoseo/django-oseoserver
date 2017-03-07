@@ -221,9 +221,9 @@ class PendingOrderAdmin(admin.ModelAdmin):
                 notify=config["notifications"]["moderation"]
             )
         if len(moderated_order_ids) == 1:
-            msg = "Order {} has been rejected".format(moderated_order_ids[0])
+            msg = "Order {} has been approved".format(moderated_order_ids[0])
         else:
-            msg = "Orders {} have been rejected".format(
+            msg = "Orders {} have been approved".format(
                 ", ".join(str(id_) for id_ in moderated_order_ids))
         self.message_user(request, message=msg)
     approve_order.short_description = "Approve selected orders"
