@@ -792,7 +792,8 @@ def _get_order_item_count(order, item_processor):
                     batch_index=0,
                     collection=collection,
                     start=start,
-                    end=end
+                    end=end,
+                    items_per_batch=settings.get_max_order_items()
                 )
             item_count += len(ids)
     else:

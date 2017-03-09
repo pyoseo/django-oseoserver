@@ -59,10 +59,11 @@ import pyxb
 from . import errors
 from . import mailsender
 from . import models
-from .models import Order
-from .models import CustomizableItem
 from . import utilities
 from .constants import ENCODING
+from .models import Order
+from .models import CustomizableItem
+from .settings import get_max_order_items
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,8 @@ def create_massive_order_batch(order, batch_index=0):
             batch_index=batch_index,
             collection=item_specification.collection,
             start=start,
-            end=end
+            end=end,
+            items_per_batch=get_max_order_items()
         )
         all_identifiers.extend(product([item_specification], identifiers))
     batch = models.Batch(
@@ -542,5 +544,3 @@ def _notify_order_stakeholders(order, notification_function, **kwargs):
         recipients=mail_recipients,
         **kwargs
     )
-
-

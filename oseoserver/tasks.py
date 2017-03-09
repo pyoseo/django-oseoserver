@@ -28,11 +28,6 @@ And the flower monitoring tool can be started with:
 
 """
 
-# TODO
-# * Instead of calling oseoserver.models directly, develop a RESTful API
-#   and communicate with the database over HTTP. This allows the task to
-#   run somewhere else, instead of having it in the same machine
-
 from __future__ import division
 from __future__ import absolute_import
 import datetime as dt
@@ -52,8 +47,8 @@ logger = get_task_logger(__name__)
 
 
 @shared_task(bind=True)
-def delete_expired_order_items(self):
-    """Delete all order items that are expired from the filesystem
+def clean_expired_items(self):
+    """Clean order items that are expired.
 
     This task should be run periodically in a celery beat worker.
 
@@ -61,33 +56,17 @@ def delete_expired_order_items(self):
 
     expired_qs = models.OrderItem.objects.filter(
         available=True, expires_on__lt=dt.datetime.now(pytz.utc))
-    tasks = [delete_item_file.subtask((item.id,)) for item in expired_qs]
-    deletion_group = group(*tasks)
+    deletion_group = group(
+        expire_item.signature((item.id,)) for item in expired_qs)
     deletion_group.apply_async()
 
 
 @shared_task(bind=True)
-def delete_item_file(self, order_item_id):
-    """Delete a single order_item from the filesystem
+def expire_item(self, item_id):
+    """Clean a single order_item."""
 
-    This task calls the `clean_files()` method of the orderitem's order
-    processor object. It also takes care of setting the item's `available`
-    attribute to False.
-
-    """
-
-    order_item = models.OrderItem.objects.get(id=order_item_id)
-    order = order_item.batch.order
-    processor = utilities.get_item_processor(order.order_type)
-    try:
-        processor.clean_files(order_item.url)
-    except Exception as e:
-        logger.error("There has been an error deleting "
-                     "{}: {}".format(order_item, e))
-    finally:
-        if order_item.available:
-            order_item.available = False
-            order_item.save()
+    order_item = models.OrderItem.objects.get(id=item_id)
+    order_item.expire()
 
 
 @shared_task(bind=True)
@@ -141,6 +120,8 @@ def process_item(self, order_item_id, max_tries=3, sleep_interval=10):
         url = order_item.deliver(path=path)
     except Exception as err:
         logger.warning(err)
+        item_processor = utilities.get_item_processor(order_item)
+        item_processor.cleanup()
         self.retry(exc=err)
 
 
@@ -170,95 +151,3 @@ def test_task(self):
     logger.info('logging something from within a task with level: info')
     logger.warning('logging something from within a task with level: warning')
     logger.error('logging something from within a task with level: error')
-
-
-# TODO - Activate this task
-# This is conditional on the existance of a new field in Batches that
-# specifies how many times should a failed batch be retried. There must
-# be a new celery-beat process that is in charge of running this task
-# periodically
-#@shared_task(bind=True)
-#def retry_failed_batches(self):
-#    """Try to process a failed batch again"""
-#
-#    g = []
-#    for failed_batch in models.Batch.objects.filter(
-#            status=models.CustomizableItem.FAILED):
-#        if failed_batch.processing_attempts < models.Batch.MAX_ATTEMPTS:
-#            if hasattr(failed_batch, "subscriptionbatch"):
-#                update_order_status = False
-#                notify_batch_execution = True
-#            else:
-#                update_order_status = True
-#                notify_batch_execution = False
-#            g.append(
-#                old_process_batch.subtask(
-#                    (failed_batch.id,),
-#                    {
-#                        "update_order_status": update_order_status,
-#                        "notify_batch_execution": notify_batch_execution
-#                    }
-#                )
-#            )
-#    job = group(g)
-#    job.apply_async()
-# def _package_batch(batch, compression):
-#     """Package all order items of a batch into a single archive"""
-#     item_processor = utilities.get_item_processor(batch.order)
-#     files_to_package = []
-#     try:
-#         for item in batch.order_items.all():
-#             for oseo_file in item.files.all():
-#                 files_to_package.append(oseo_file.url)
-#         packed = item_processor.package_files(
-#             packaging=compression,
-#             domain=Site.objects.get_current().domain,
-#             site_name="phony_site_name",
-#             file_urls=files_to_package,
-#         )
-#     except Exception as e:
-#         logger.error("there has been an error packaging the "
-#                      "batch {}: {}".format(batch, str(e)))
-#         utilities.send_batch_packaging_failed_email(batch, str(e))
-#         raise
-#     expiry_date = datetime.now(pytz.utc) + timedelta(
-#         days=order_type.item_availability_days)
-
-
-# # TODO - Refactor this code
-# @shared_task(bind=True)
-# def update_order_status(self, order_id):
-#     """Update the status of an order whenever the status of its batch changes
-#
-#     :arg order_id:
-#     :type order_id: oseoserver.models.Order
-#     """
-#
-#     order = models.Order.objects.get(pk=order_id)
-#     old_order_status = order.status
-#     batch = order.batches.get()  # ProductOrder's have only one batch
-#     if batch.status == CustomizableItem.COMPLETED and order.packaging != '':
-#         try:
-#             _package_batch(batch, order.packaging)
-#         except Exception as e:
-#             order.status = CustomizableItem.FAILED
-#             order.additional_status_info = str(e)
-#             order.save()
-#             raise
-#     new_order_status = batch.status
-#     if (old_order_status != new_order_status or
-#                 old_order_status == CustomizableItem.FAILED):
-#         order.status = new_order_status
-#         if new_order_status == CustomizableItem.COMPLETED:
-#             order.completed_on = datetime.now(pytz.utc)
-#             order.additional_status_info = ""
-#         elif new_order_status == CustomizableItem.FAILED:
-#             details = []
-#             for oi in batch.order_items.all():
-#                 if oi.status == CustomizableItem.FAILED:
-#                     additional = oi.additional_status_info
-#                     details.append((oi.id, additional))
-#             msg = "\n".join(["* Order item {}: {}".format(oi, det) for
-#                              oi, det in details])
-#             order.additional_status_info = msg
-#         order.save()
