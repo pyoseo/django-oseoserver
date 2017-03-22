@@ -135,7 +135,8 @@ def create_oseo_delivery_options(instance):
 
 def create_oseo_items_status(batch):
     items_status = []
-    for item in batch.order_items.all():
+    queryset = batch.order_items.all().order_by("item_specification__id")
+    for item in queryset:
         collection_id = utilities.get_collection_identifier(
             item.item_specification.collection)
         status_item = oseo.CommonOrderStatusItemType(

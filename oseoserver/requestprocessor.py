@@ -382,6 +382,12 @@ def handle_submit(order, approved, notify=False):
         Whether the order has been approved or rejected
     notify: bool, optional
         Whether to e-mail the order's user informing of the moderation result
+
+    Returns
+    -------
+    bool
+     Whether the order has been approved or not
+
     """
 
     if approved:

@@ -115,34 +115,35 @@ def get_batch_completed_items(batch, behaviour):
     list_all_items = last_time is None or behaviour == batch.ALL_READY
     order_delivery = batch.order.selected_delivery_option.delivery_type
     completed = []
-    if batch.status == Order.COMPLETED:
-        batch_complete_items = []
-        for item in batch.order_items.all():
-            item_spec = item.item_specification
-            try:
-                delivery = (
-                    item_spec.selected_delivery_option.delivery_type)
-            except models.ItemSpecificationDeliveryOption.DoesNotExist:
-                delivery = order_delivery
-            if delivery != models.BaseDeliveryOption.ONLINE_DATA_ACCESS:
-                # describeResultAccess only applies to items that specify
-                # 'onlinedataaccess' as delivery type
-                logger.debug(
-                    "item {} does not specify onlinedataaccess as its "
-                    "delivery type, skipping item...".format(item)
-                )
-                continue
-            completed_since_last = (item.completed_on is None or
-                                    last_time is None or
-                                    item.completed_on >= last_time)
-            list_this_item = (
-                behaviour == batch.NEXT_READY and completed_since_last)
-            if list_all_items or list_this_item:
-                batch_complete_items.append(item)
-        if batch.order.packaging == Order.ZIP:
-            completed.append(batch_complete_items[0])
-        else:  # lets get each file that is complete
-            completed = batch_complete_items
-    else:
-        logger.debug("batch {} is not complete".format(batch))
+
+    batch_complete_items = []
+    queryset = batch.order_items.filter(
+        status=batch.order.COMPLETED
+    ).order_by("item_specification__id")
+    for item in queryset:
+        item_spec = item.item_specification
+        try:
+            delivery = (
+                item_spec.selected_delivery_option.delivery_type)
+        except models.ItemSpecificationDeliveryOption.DoesNotExist:
+            delivery = order_delivery
+        if delivery != models.BaseDeliveryOption.ONLINE_DATA_ACCESS:
+            # describeResultAccess only applies to items that specify
+            # 'onlinedataaccess' as delivery type
+            logger.debug(
+                "item {} does not specify onlinedataaccess as its "
+                "delivery type, skipping item...".format(item)
+            )
+            continue
+        completed_since_last = (item.completed_on is None or
+                                last_time is None or
+                                item.completed_on >= last_time)
+        list_this_item = (
+            behaviour == batch.NEXT_READY and completed_since_last)
+        if list_all_items or list_this_item:
+            batch_complete_items.append(item)
+    if batch.order.packaging == Order.ZIP:
+        completed.append(batch_complete_items[0])
+    else:  # lets get each file that is complete
+        completed = batch_complete_items
     return completed

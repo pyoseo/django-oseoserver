@@ -268,10 +268,9 @@ class OrderItemAdmin(admin.ModelAdmin):
         (None, {
             "fields": (
                 "identifier",
-                "collection",
-                "batch",
-                "order",
-                "item_specification",
+                "url",
+                "link_to_batch",
+                "link_to_item_specification",
                 "status",
                 "available",
                 "status_changed_on",
@@ -284,7 +283,6 @@ class OrderItemAdmin(admin.ModelAdmin):
                 "expires_on",
                 "downloads",
                 "last_downloaded_at",
-                "url",
                 "additional_status_info",
                 "mission_specific_status_info",
             )
@@ -292,11 +290,11 @@ class OrderItemAdmin(admin.ModelAdmin):
     )
     list_display = (
         "id",
+        "status",
         "available",
         "link_to_batch",
         "link_to_order",
         "identifier",
-        "status",
         "status_changed_on",
     )
     list_filter = (
@@ -308,11 +306,20 @@ class OrderItemAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "status_changed_on"
     readonly_fields = (
+        "identifier",
+        "url",
+        "status",
         "status_changed_on",
         "completed_on",
         "available",
-        "batch",
+        "link_to_batch",
+        "link_to_item_specification",
         "item_specification",
+        "expires_on",
+        "downloads",
+        "last_downloaded_at",
+        "additional_status_info",
+        "mission_specific_status_info",
     )
 
     def link_to_batch(self, obj):
@@ -329,6 +336,15 @@ class OrderItemAdmin(admin.ModelAdmin):
         return format_html(html)
     link_to_order.short_description = "Order"
     link_to_order.allow_tags = True
+
+    def link_to_item_specification(self, obj):
+        url = reverse("admin:oseoserver_itemspecification_change",
+                      args=(obj.item_specification.id,))
+        html = "<a href='{0}'>Item specification {1}</a>".format(
+            url, obj.item_specification.id)
+        return format_html(html)
+    link_to_item_specification.short_description = "Item specification"
+    link_to_item_specification.allow_tags = True
 
 
 @admin.register(models.DeliveryInformation)

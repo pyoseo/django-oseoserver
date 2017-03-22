@@ -32,8 +32,12 @@ from __future__ import division
 from __future__ import absolute_import
 import datetime as dt
 
+import celery
+from celery import chord
+from celery import group
 from celery import shared_task
-from celery import group, chain
+from celery import Task
+from celery.result import AsyncResult
 from celery.utils.log import get_task_logger
 import pytz
 
@@ -42,8 +46,6 @@ from . import models
 from . import utilities
 
 logger = get_task_logger(__name__)
-
-# TODO - Find another way to send error e-mails now that celery dropped it from tasks
 
 
 @shared_task(bind=True)
@@ -54,6 +56,7 @@ def clean_expired_items(self):
 
     """
 
+    logger.debug("Cleaning expired items...")
     expired_qs = models.OrderItem.objects.filter(
         available=True, expires_on__lt=dt.datetime.now(pytz.utc))
     deletion_group = group(
@@ -70,59 +73,98 @@ def expire_item(self, item_id):
 
 
 @shared_task(bind=True)
-def notify_user_batch_available(self, batch_id):
-    batch = models.Batch.objects.get(pk=batch_id)
-    mailsender.send_product_batch_available_email(batch)
+def notify_user_batch_available(self, *item_ids):
+    item = models.OrderItem.objects.get(pk=item_ids[0])
+    mailsender.send_product_batch_available_email(item.batch)
 
 
 @shared_task(bind=True)
 def process_batch(self, batch_id):
-    """Process a batch in the queue."""
+    """Process a batch in the queue.
+
+    Parameters
+    ----------
+    batch_id: int
+        Primary key of the batch in the database
+
+    """
+
     batch = models.Batch.objects.get(id=batch_id)
-    batch_group = group(
-        process_item.signature((i.id,)) for i in batch.order_items.all())
+    item_tasks = [
+        process_item.signature((i.id,)) for i in batch.order_items.all()]
     config = utilities.get_generic_order_config(batch.order.order_type)
     notify_batch_available = config["notifications"]["batch_availability"]
     if notify_batch_available.lower() == "immediate":
-        batch_chain = chain(
-            batch_group,
-            notify_user_batch_available.signature((batch_id,))
-        )
-        logger.info("batch_chain: {}".format(batch_chain))
-        batch_chain()
+        header = item_tasks
+        callback = notify_user_batch_available.signature()
+        batch_chord = chord(header)(callback)
+        batch_chord.get()
     else:
+        batch_group = group(*item_tasks)
         batch_group.apply_async()
+
+
+class ProcessItemTask(Task):
+    """A custom task that reimplements the on_failure handler.
+
+    This class is the base for the ``process_item()`` task. This task is
+    responsible for processing ordered items. The on_failure and on_success
+    methods are reimplemented here in order to update an order item's status
+    in the database after the task is done.
+
+    """
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        order_item = models.OrderItem.objects.get(pk=args[0])
+        order_item.set_status(
+            order_item.FAILED,
+            exc.args
+        )
+        mailsender.send_item_processing_failed_email(order_item, task_id, exc,
+                                                     args, einfo.traceback)
+
+    def on_success(self, retval, task_id, args, kwargs):
+        order_item = models.OrderItem.objects.get(pk=args[0])
+        order_item.set_status(order_item.COMPLETED)
 
 
 @shared_task(
     bind=True,
+    base=ProcessItemTask,
+    autoretry_for=(Exception,),
+    default_retry_delay=30,  # seconds
     max_retries=3,
-    default_retry_delay=20,
 )
-def process_item(self, order_item_id, max_tries=3, sleep_interval=10):
-    """Process an order item in the queue.
+def process_item(self, order_item_id):
+    """Process an order item
 
-    Parameters
-    ----------
-    order_item_id: int
-        The primary key value of the order item in the database
-    max_tries: int, optional
-        How many times should the processing be retried, in case it fails
-    sleep_interval: int, optional
-        How many seconds should the worker sleep before retrying the
-        processing
+    Processing is composed by two steps:
+
+    * Preparing the item according to any customization options that might
+      have been requested;
+    * Delivering the prepared item using the delivery method requested
+
+    This task inherits the ProcessItemTask so that it may be possible to
+    update the order item's status in case of failure
 
     """
 
     order_item = models.OrderItem.objects.get(pk=order_item_id)
-    try:
-        path = order_item.process()
-        url = order_item.deliver(path=path)
-    except Exception as err:
-        logger.warning(err)
-        item_processor = utilities.get_item_processor(order_item)
-        item_processor.cleanup()
-        self.retry(exc=err)
+    order_item.set_status(
+        order_item.IN_PRODUCTION,
+        "Item is being processed (Try number {}".format(self.request.retries)
+    )
+    prepared_url = order_item.prepare()
+    delivered_url = order_item.deliver(prepared_url)
+    return delivered_url
+
+
+@celery.current_app.task
+def handle_process_item_failure(task_id):
+    result = AsyncResult(task_id)
+    exc = result.info
+    print("Task {0} raised exception: {1!r}\n{2!r}".format(
+        task_id, exc, result.traceback))
 
 
 @shared_task(bind=True)
@@ -151,3 +193,5 @@ def test_task(self):
     logger.info('logging something from within a task with level: info')
     logger.warning('logging something from within a task with level: warning')
     logger.error('logging something from within a task with level: error')
+
+

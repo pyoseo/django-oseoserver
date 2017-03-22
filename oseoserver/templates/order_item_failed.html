@@ -1,12 +1,6 @@
-<h3>Order item has failed</h3>
-<p>Task: {{ name }} (id: {{ id }} }})</p>
-<p>The following details are available:
-    <ul>
-
-    </ul>
-</p>
-<p>Exception: {{ exc }}</p>
-<p>Exception: {{ highlighted_exc|safe }}</p>
+<h3>Order item {{ item.id }} has failed</h3>
+<p>Task: {{ task_id }}</p>
+<p>Exception: {{ exception }}</p>
 <p>Calling args: {{ args }}</p>
 <p>Calling kwargs: {{ kwargs }}</p>
-<p>Full traceback: {{ highlighted_traceback|safe }}</p>
+<p>Full traceback: {{ traceback|safe }}</p>

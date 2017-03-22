@@ -12,13 +12,17 @@ from django.core.files import File
 from html2text import html2text
 from django.conf import settings as django_settings
 from mailqueue.models import MailerMessage
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import HtmlFormatter
 
 from . import settings as oseo_settings
-from .models import Order
 
 logger = logging.getLogger(__name__)
 
 MAIL_SUBJECT = "Copernicus Global Land Service"
+
+
 
 
 def send_moderation_request_email(order_type, order_id):
@@ -160,9 +164,9 @@ def send_product_order_moderated_email(order, approved, recipients):
     }
     subject = " - ".join((
         MAIL_SUBJECT,
-        "Order {reference!r} has been {status}".format(
+        "Order {reference!r} has been {moderation}".format(
             reference=order.reference,
-            status=order.status.lower()
+            moderation=order.ACCEPTED if approved else order.CANCELLED
         )
     ))
     msg = render_to_string(template, context)
@@ -190,9 +194,8 @@ def send_subscription_batch_available_email(batch):
 
 def send_product_batch_available_email(batch):
     urls = []
-    for oi in batch.order_items.all():
-        for oseo_file in oi.files.all():
-            urls.append(oseo_file.url)
+    for order_item in batch.order_items.all():
+        urls.append(order_item.url)
     context = {
         "batch": batch,
         "urls": urls,
@@ -205,15 +208,22 @@ def send_product_batch_available_email(batch):
     send_email(subject, msg, recipients, html=True)
 
 
-def send_failed_attempt_email(order_id, item_id, message):
-    full_message = "Order: {}\n\tOrderItem: {}\n\n\t".format(
-        order_id, item_id)
-    full_message += message
-    subject = ("Copernicus Global Land Service - Unsuccessful processing "
-               "attempt")
+def send_item_processing_failed_email(order_item, task_id, exception,
+                                      task_args, traceback):
+    context = {
+        "order_item": order_item,
+        "task_id": task_id,
+        "args": task_args,
+        "exception": exception,
+        "traceback": highlight(traceback, PythonLexer(), HtmlFormatter()),
+    }
+    template = "order_item_failed.html"
+    subject = ("Copernicus Global Land Service - Order item {} processing "
+               "failed".format(order_item.id))
     UserModel = get_user_model()
     recipients = UserModel.objects.filter(is_staff=True).exclude(email="")
-    send_email(subject, full_message, recipients, html=True)
+    msg = render_to_string(template, context)
+    send_email(subject, msg, recipients, html=True)
 
 
 def send_invalid_request_email(request_data, exception_report):
