@@ -1,5 +1,3 @@
-from collections import namedtuple
-
 import dateutil.parser
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError

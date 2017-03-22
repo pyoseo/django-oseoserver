@@ -63,6 +63,32 @@ class SubscriptionBatchViewSet(viewsets.ReadOnlyModelViewSet):
         force_creation:bool, optional
             Whether a batch should be created even if it already exists
 
+        Examples
+        --------
+        This view can be called by an external client with the
+        following:
+
+        >>> import requests
+        >>> response = requests.post(
+        ...     "http://localhost:8000/api/subscriptionbatch/process_timeslot/",
+        ...     data={
+        ...         "timeslot": "2017-01-01",
+        ...         "collection": "lst",
+        ...         "force_creation": True,
+        ...     },
+        ...     headers={
+        ...         "Authorization": "Token <secret-token>"
+        ...     },
+        ... )
+
+        Alternatively, using ``httpie`` on the command-line:
+
+        http POST localhost:8000/api/subscriptionbatch/process_timeslot/ \
+            "Authorization: Token <secret-token>" \
+            timeslot=2017-01-01 \
+            collection=lst \
+            force_creation=true
+
         """
 
         serializer = serializers.SubscriptionProcessTimeslotSerializer(
@@ -89,6 +115,8 @@ class SubscriptionBatchViewSet(viewsets.ReadOnlyModelViewSet):
                 celery.current_app.send_task(
                     "oseoserver.tasks.process_batch", (batch.id,))
             new_batches.append(batch)
+        if len(new_batches) == 0:
+            logger.warning("Did not create any batch")
         response_serializer = self.get_serializer(new_batches, many=True)
         return Response(response_serializer.data)
 

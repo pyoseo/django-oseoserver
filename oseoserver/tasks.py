@@ -85,7 +85,7 @@ def process_batch(self, batch_id):
     Parameters
     ----------
     batch_id: int
-        Primary key of the batch in the database
+        Primary key of the batch in the database.
 
     """
 
@@ -100,7 +100,7 @@ def process_batch(self, batch_id):
         batch_chord = chord(header)(callback)
         batch_chord.get()
     else:
-        batch_group = group(*item_tasks)
+        batch_group = group(item_tasks)
         batch_group.apply_async()
 
 

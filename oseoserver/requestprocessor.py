@@ -372,7 +372,7 @@ def handle_product_order(order):
 
 
 def handle_submit(order, approved, notify=False):
-    """Handle a newly submitted order after it has been moderated
+    """Handle a newly submitted order after it has been moderated.
 
     Parameters
     ----------
@@ -427,7 +427,7 @@ def handle_subscription_order(order):
     """Handle an already accepted subscription order.
 
     The handling process consists in changing the status of the order so that
-    it reflects its waiting procedure. Subscription orders are processed on
+    it reflects its waiting status. Subscription orders are processed on
     demand and they're batches are only created when necessary.
 
     """
