@@ -159,14 +159,7 @@ def process_item(self, order_item_id):
     return delivered_url
 
 
-@celery.current_app.task
-def handle_process_item_failure(task_id):
-    result = AsyncResult(task_id)
-    exc = result.info
-    print("Task {0} raised exception: {1!r}\n{2!r}".format(
-        task_id, exc, result.traceback))
-
-
+# TODO - Test this code
 @shared_task(bind=True)
 def terminate_expired_subscriptions(self):
     """Terminate subscriptions that are expired

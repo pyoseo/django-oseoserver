@@ -29,10 +29,12 @@ class SubscriptionOrderViewSet(viewsets.ReadOnlyModelViewSet):
         order_type=models.Order.SUBSCRIPTION_ORDER)
     serializer_class = serializers.SubscriptionOrderSerializer
 
+    # TODO - test this code
     @detail_route(methods=["POST",])
     def cancel(self, request, *args, **kwargs):
         subscription = self.get_object()
         logger.debug("Would cancel subscription {0.id}".format(subscription))
+        requestprocessor.cancel_order(subscription, notify=True)
         return Response()
 
 
@@ -41,11 +43,15 @@ class SubscriptionBatchViewSet(viewsets.ReadOnlyModelViewSet):
         order__order_type=models.Order.SUBSCRIPTION_ORDER)
     serializer_class = serializers.SubscriptionBatchSerializer
 
+    # TODO - test this code
     @detail_route(methods=["POST",])
     def clean(self, request, *args, **kwargs):
         batch = self.get_object()
         logger.debug("Would clean subscription "
                      "batch {0.id}".format(batch))
+        for order_item in batch.order_items.all():
+            celery.current_app.send_task(
+                "oseoserver.tasks.expire_item", (order_item.id,))
         return Response()
 
     @list_route(methods=["POST",],
