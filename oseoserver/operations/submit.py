@@ -831,31 +831,22 @@ def _validate_order_number_of_items(order_items, order_type):
 
 
 def _validate_subscription_date_range(order):
+    """Be sure that the input subscription order has a date range"""
     date_range_name = "DateRange"
-    try:
-        models.SelectedOrderOption.objects.get(
-            option=date_range_name, order=order)
-    except models.SelectedOrderOption.DoesNotExist:
-        logger.debug(
-            "Could not find a {!r} option on the order, looking in item "
-            "specifications...".format(date_range_name)
-        )
-        for item_spec in models.ItemSpecification.objects.filter(order=order):
-            try:
-                item_spec.selected_options.get(option=date_range_name)
-            except models.SelectedItemOption.DoesNotExist:
-                logger.warning(
-                    "There is at least one item specification without a "
-                    "{!r} option. Setting a default option in the "
-                    "order".format(date_range_name)
-                )
-                default_date_range = _create_default_date_range_option(
-                    date_range_name=date_range_name,
-                    item_processor=utilities.get_item_processor(
-                        order.order_type)
-                )
-                default_date_range.order = order
-                default_date_range.save()
-                break
-
+    for item_specification in order.item_specifications.all():
+        date_range = item_specification.get_option(date_range_name)
+        if date_range is None:
+            logger.warning(
+                "There is at least one item specification without a "
+                "{!r} option. Setting a default option in the "
+                "order".format(date_range_name)
+            )
+            default_date_range = _create_default_date_range_option(
+                date_range_name=date_range_name,
+                item_processor=utilities.get_item_processor(
+                    order.order_type)
+            )
+            default_date_range.order = order
+            default_date_range.save()
+            break
 

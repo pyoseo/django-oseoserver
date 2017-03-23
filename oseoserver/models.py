@@ -309,6 +309,16 @@ class ItemSpecification(models.Model):
     def __str__(self):
         return "{0.id}".format(self)
 
+    def get_option(self, name):
+        option = None
+        try:
+            option = self.selected_options.get(option=name)
+        except SelectedItemOption.DoesNotExist:
+            logger.debug("Could not find option {!r} on the item "
+                         "specification. Trying on the order...".format(name))
+            option = self.order.selected_options.get(option=name)
+        return option
+
 
 @python_2_unicode_compatible
 class OrderItem(CustomizableItem):

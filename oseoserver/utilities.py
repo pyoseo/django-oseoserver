@@ -1,4 +1,4 @@
-# Copyright 2016 Ricardo Garcia Silva
+# Copyright 2017 Ricardo Garcia Silva
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,24 +12,53 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Some utility functions for pyoseo
-"""
+"""Some utility functions for pyoseo."""
 
 import importlib
 import logging
+import re
 
 
+import dateutil.parser
 from lxml import etree
-#from celery.utils import mail
-#from pygments import highlight
-#from pygments.lexers import PythonLexer
-#from pygments.formatters import HtmlFormatter
 
 from . import settings
 from . import errors
 
 logger = logging.getLogger(__name__)
+
+
+def convert_date_range_option(date_range):
+    """Convert a DateRange option to datetime objects
+
+    Parameters
+    ----------
+    date_range: str
+        The value of a DateRange option.
+
+    Returns
+    -------
+    start: datetime.datetime
+        The date range's start value
+    stop: datetime.datetime
+        The date range's stop value
+
+    Examples
+    --------
+
+    >>> convert_date_range_option(
+    ...     "start: 2017-01-01T00:00:00+00:00 stop: 2017-01-02T00:00:00+00:00")
+    (datetime.datetime(2017, 1, 1, 0, 0, tzinfo=tzlocal()),
+    (datetime.datetime(2017, 1, 1, 0, 0, tzinfo=tzlocal()),
+
+    """
+
+    re_obj = re.search(
+        r"^start: (.*?) stop: (.*?)$",
+        date_range
+    )
+    start, stop = (dateutil.parser.parse(i) for i in re_obj.groups())
+    return start, stop
 
 
 def get_etree_parser():
@@ -52,7 +81,7 @@ def import_class(python_path, *instance_args, **instance_kwargs):
         the_module = importlib.import_module(module_path)
         the_class = getattr(the_module, class_name)
         instance = the_class(*instance_args, **instance_kwargs)
-    except ImportError as err:
+    except ImportError:
         raise errors.ServerError(
             "Invalid configuration: {0}".format(python_path))
     else:
@@ -87,7 +116,6 @@ def get_option_configuration(option_name):
         raise errors.OseoServerError("Invalid option {!r}".format(option_name))
 
 
-
 def validate_collection_id(collection_id):
     for collection_config in settings.get_collections():
         if collection_config.get("collection_identifier") == collection_id:
@@ -102,7 +130,8 @@ def validate_processing_option(name, value, order_type, collection_name):
     """Validate the input arguments against the configured options"""
 
     # 1. can this option be used with the current collection and order_type?
-    collection_config = get_order_configuration(order_type, collection_name)
+    collection_config = get_collection_settings(
+        get_collection_identifier(collection_name))
     if name not in collection_config.get("options", []):
         raise errors.InvalidParameterValueError("option", value=name)
 
@@ -177,6 +206,7 @@ def _c(value):
 
     return '' if value is None else str(value)
 
+
 def _n(value):
     """
     Convert between an empty string and a None
@@ -186,29 +216,3 @@ def _n(value):
     """
 
     return None if value == '' else value
-
-
-#class OseoCeleryErrorMail(mail.ErrorMail):
-#
-#    def format_body(self, context):
-#        template = "order_item_failed.html"
-#        context["highlighted_exc"] = highlight(
-#            context["exc"], PythonLexer(), HtmlFormatter())
-#        context["highlighted_traceback"] = highlight(
-#            context["traceback"], PythonLexer(), HtmlFormatter())
-#        msg = render_to_string(template, context)
-#        return msg
-#
-#    def format_subject(self, context):
-#        subject = "Copernicus Global Land Service - Task error"
-#        return subject
-#
-#    def send(self, context, exc, fail_silently=True):
-#        if self.should_send(context, exc):
-#            UserModel = get_user_model()
-#            send_email(
-#                self.format_subject(context),
-#                self.format_body(context),
-#                UserModel.objects.filter(is_staff=True).exclude(email=""),
-#                html=True
-#            )

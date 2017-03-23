@@ -161,22 +161,32 @@ def process_item(self, order_item_id):
 
 # TODO - Test this code
 @shared_task(bind=True)
-def terminate_expired_subscriptions(self):
+def terminate_expired_subscriptions(self, notify_user=False):
     """Terminate subscriptions that are expired
 
     This task should be run in a celery beat worker with a daily frequency.
     """
 
     now = dt.datetime.now(pytz.utc)
-    to_terminate = models.Order.objects.filter(
-        order_type=models.Order.SUBSCRIPTION_ORDER,
-        status=models.CustomizableItem.SUSPENDED,
-        end_on__lt=now.strftime("%Y-%m-%d")
-    )
-    for subscription_order in to_terminate:
-        subscription_order.status = models.CustomizableItem.TERMINATED
-        subscription_order.completed_on = now
-        subscription_order.save()
+    queryset = models.Order.objects.filter(
+        order_type=models.Order.SUBSCRIPTION_ORDER
+    ).exclude(status__in=[
+        models.Order.CANCELLED,
+        models.Order.SUBMITTED,
+        models.Order.TERMINATED,
+    ])
+    for subscription in queryset:
+        for item_spec in subscription.item_specifications.all():
+            date_range = item_spec.get_option("DateRange")
+            start, stop = utilities.convert_date_range_option(date_range.value)
+            if stop < now:
+                logger.info("Terminating subscription {}".format(subscription))
+                subscription.status = models.Order.TERMINATED
+                subscription.status_changed_on = now
+                subscription.completed_on = now
+                subscription.save()
+                if notify_user:
+                    pass
 
 
 @shared_task(bind=True)
