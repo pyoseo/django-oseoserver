@@ -1,4 +1,5 @@
 import dateutil.parser
+import pytz
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
@@ -38,6 +39,8 @@ class SubscriptionProcessTimeslotSerializer(serializers.BaseSerializer):
     def to_internal_value(self, data):
         try:
             timeslot = dateutil.parser.parse(data.get("timeslot"))
+            timeslot = timeslot.replace(
+                tzinfo=pytz.utc) if timeslot.tzinfo is None else timeslot
         except ValueError:
             raise ValidationError({"timeslot": "Invalid timeslot format"})
         except TypeError:

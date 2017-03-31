@@ -21,6 +21,7 @@ import re
 
 import dateutil.parser
 from lxml import etree
+import pytz
 
 from . import settings
 from . import errors
@@ -58,6 +59,8 @@ def convert_date_range_option(date_range):
         date_range
     )
     start, stop = (dateutil.parser.parse(i) for i in re_obj.groups())
+    start = start.replace(tzinfo=pytz.utc) if start.tzinfo is None else start
+    stop = stop.replace(tzinfo=pytz.utc) if stop.tzinfo is None else stop
     return start, stop
 
 
@@ -70,22 +73,6 @@ def get_etree_parser():
         load_dtd=False,
         no_network=True
     )
-
-
-def import_class(python_path, *instance_args, **instance_kwargs):
-    """
-    """
-
-    module_path, sep, class_name = python_path.rpartition('.')
-    try:
-        the_module = importlib.import_module(module_path)
-        the_class = getattr(the_module, class_name)
-        instance = the_class(*instance_args, **instance_kwargs)
-    except ImportError:
-        raise errors.ServerError(
-            "Invalid configuration: {0}".format(python_path))
-    else:
-        return instance
 
 
 def get_generic_order_config(order_type):
@@ -114,6 +101,29 @@ def get_option_configuration(option_name):
             return option
     else:
         raise errors.OseoServerError("Invalid option {!r}".format(option_name))
+
+
+def get_subscription_duration(order, collection):
+    item_specification = order.item_specifications.filter(
+        collection=collection).last()
+    date_range = item_specification.get_option("DateRange")
+    return convert_date_range_option(date_range.value)
+
+
+def import_class(python_path, *instance_args, **instance_kwargs):
+    """
+    """
+
+    module_path, sep, class_name = python_path.rpartition('.')
+    try:
+        the_module = importlib.import_module(module_path)
+        the_class = getattr(the_module, class_name)
+        instance = the_class(*instance_args, **instance_kwargs)
+    except ImportError:
+        raise errors.ServerError(
+            "Invalid configuration: {0}".format(python_path))
+    else:
+        return instance
 
 
 def validate_collection_id(collection_id):

@@ -241,37 +241,36 @@ def create_subscription_batch(order, timeslot, collection,
 
     """
 
-    if order.status in (Order.SUBMITTED,
-                        Order.CANCELLED,
-                        Order.TERMINATED):
-        logger.error("Order {!r} has a {!r} status. Cannot create new "
-                     "batches".format(order.id, order.status))
-        raise errors.InvalidOrderIdentifierError()
-    previous_batch = find_subscription_batch(order, timeslot, collection)
-    result = None
     created = False
-    if previous_batch:
-        logger.debug(
-            "Found a previously existing batch for the same timeslot and "
-            "collection: {!r}".format(previous_batch.id)
-        )
-        if force_creation:
-            logger.debug("Deleting previously existing batch...")
-            previous_batch.delete()
-        else:
-            result = previous_batch
-    if result is None:
-        batch = models.Batch(
-            order=order,
-            status=order.status,
-            additional_status_info="timeslot:{!r} collection:{!r}".format(
-                timeslot, collection)
-        )
-        batch.full_clean()
-        batch.save()
-        processor = utilities.get_item_processor(order.order_type)
-        for item_spec in order.item_specifications.filter(
-                collection=collection):
+    result = None
+    try:
+        _validate_subscription_batch_creation(
+            order=order, collection=collection, timeslot=timeslot)
+    except errors.InvalidOrderIdentifierError:
+        pass
+    else:
+        previous = find_subscription_batch(order, timeslot, collection)
+        if previous:
+            if force_creation:
+                logger.debug(
+                    "Found a previously existing batch for the same "
+                    "timeslot and collection {!r}. Deleting...".format(
+                        previous.id)
+                )
+                previous.delete()
+            else:
+                result = previous
+        if result is None:
+            batch = models.Batch(
+                order=order,
+                status=order.status,
+                additional_status_info="timeslot:{!r} collection:{!r}".format(
+                    timeslot, collection)
+            )
+            batch.full_clean()
+            batch.save()
+            processor = utilities.get_item_processor(order.order_type)
+            item_spec = order.item_specifications.get(collection=collection)
             identifier = processor.get_subscription_item_identifier(
                 timeslot, collection)
             order_item = models.OrderItem(
@@ -281,8 +280,8 @@ def create_subscription_batch(order, timeslot, collection,
             )
             order_item.full_clean()
             order_item.save()
-        result = batch
-        created = True
+            result = batch
+            created = True
     return result, created
 
 
@@ -556,3 +555,17 @@ def _notify_order_stakeholders(order, notification_function, **kwargs):
         recipients=mail_recipients,
         **kwargs
     )
+
+
+def _validate_subscription_batch_creation(order, collection, timeslot):
+    start, end = utilities.get_subscription_duration(order, collection)
+    if order.status in (Order.SUBMITTED, Order.CANCELLED, Order.TERMINATED):
+        logger.error("Order {!r} has a {!r} status. Cannot create new "
+                     "batches".format(order.id, order.status))
+        raise errors.InvalidOrderIdentifierError()
+    elif not (start <= timeslot <= end):
+        logger.debug("Requested timeslot is outside of subscription's "
+                     "temporal range. Cannot create new batch")
+        raise errors.InvalidOrderIdentifierError()
+
+

@@ -714,6 +714,7 @@ def validate_order_delivery_options(order):
 def validate_order_type_specific_constraints(order):
     if order.order_type == Order.SUBSCRIPTION_ORDER:
         _validate_subscription_date_range(order)
+        _validate_subscription_items(order)
 
 
 def _create_default_date_range_option(date_range_name, item_processor):
@@ -850,3 +851,18 @@ def _validate_subscription_date_range(order):
             default_date_range.save()
             break
 
+
+def _validate_subscription_items(order):
+    """Be sure that there is only one order item in the order request.
+    
+    Currently we do not support more than one item in the request for 
+    subscription orders.
+    
+    """
+    item_spec_count = order.item_specifications.count()
+    if item_spec_count != 1:
+        logger.error(
+            "Subscription orders cannot have more than 1 item specification. "
+            "Order {!r} has {}".format(order, item_spec_count)
+        )
+        raise errors.NoApplicableCodeError()

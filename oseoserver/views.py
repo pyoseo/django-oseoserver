@@ -120,7 +120,8 @@ class SubscriptionBatchViewSet(viewsets.ReadOnlyModelViewSet):
                     "Sending batch {!r} to processing queue...".format(batch))
                 celery.current_app.send_task(
                     "oseoserver.tasks.process_batch", (batch.id,))
-            new_batches.append(batch)
+            if batch is not None:
+                new_batches.append(batch)
         if len(new_batches) == 0:
             logger.warning("Did not create any batch")
         response_serializer = self.get_serializer(new_batches, many=True)
