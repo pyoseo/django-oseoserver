@@ -43,6 +43,7 @@ result, status_code, response_headers = s.process_request(request)
 #  pd.toxml()
 #
 from __future__ import absolute_import
+import datetime as dt
 import importlib
 import logging
 from itertools import product
@@ -52,6 +53,7 @@ from django.db.models import Q
 from django.db import transaction
 from django.contrib.auth import get_user_model
 from lxml import etree
+import pytz
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows as ows_bindings
 import pyxb
@@ -83,8 +85,12 @@ OPERATION_CALLABLES = {
 
 def cancel_order(order, notify=False,
                  notification_details="User has cancelled the order"):
+    """Cancel an order."""
+    previous_status = order.status
     order.status = CustomizableItem.CANCELLED
     order.additional_status_info = notification_details
+    if previous_status != order.status:
+        order.status_changed_on = dt.datetime.now(pytz.utc)
     order.save()
     if notify:
         _notify_order_stakeholders(
