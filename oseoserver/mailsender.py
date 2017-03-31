@@ -1,4 +1,5 @@
 import logging
+import os
 try:
     from io import StringIO
 except ImportError:  # python2
@@ -17,6 +18,7 @@ from pygments.lexers import PythonLexer
 from pygments.formatters import HtmlFormatter
 
 from . import settings as oseo_settings
+from . import utilities
 
 logger = logging.getLogger(__name__)
 
@@ -137,18 +139,27 @@ def send_subscription_moderated_email(order, approved, recipients):
     subscription_order_settings = oseo_settings.get_subscription_order()
     item_availability_days = subscription_order_settings[
         "item_availability_days"]
-    collections = []
-    for item in order.item_specifications.all():
-        collections.append((item.collection, item.selected_options.all()))
     template = "subscription_moderated.html"
+    item_spec = order.item_specifications.get()
+    collection_name = item_spec.collection
+    collection_settings = utilities.get_collection_settings(
+        utilities.get_collection_identifier(collection_name))
+    generation_frequency = collection_settings["generation_frequency"]
+    date_range = item_spec.get_option("DateRange")
+    start, end = utilities.convert_date_range_option(date_range.value)
+    moderation_result = "accepted" if approved else "rejected"
     context = {
         "order": order,
-        "collections": collections,
         "approved": approved,
+        "moderation_result": moderation_result,
+        "collection": collection_name,
+        "frequency": generation_frequency,
         "item_availability_days": item_availability_days,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
     }
     subject = ("Copernicus Global Land Service - Subscription has "
-        "been {}".format("accepted" if approved else "rejected"))
+        "been {}".format(moderation_result))
     msg = render_to_string(template, context)
     send_email(subject, msg, recipients, html=True)
 
