@@ -95,10 +95,9 @@ def process_batch(self, batch_id):
     config = utilities.get_generic_order_config(batch.order.order_type)
     notify_batch_available = config["notifications"]["batch_availability"]
     if notify_batch_available.lower() == "immediate":
-        header = item_tasks
         callback = notify_user_batch_available.signature()
-        batch_chord = chord(header)(callback)
-        batch_chord.get()
+        batch_chord = chord(item_tasks)(callback)
+        #batch_chord.get()
     else:
         batch_group = group(item_tasks)
         batch_group.apply_async()
