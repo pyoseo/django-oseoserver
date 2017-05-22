@@ -1,18 +1,29 @@
-from setuptools import setup, find_packages
+#!/usr/bin/env python
 
-exec(open("oseoserver/version.py").read())
+import io
+from os.path import dirname, join
+
+from setuptools import find_packages, setup
+
+
+def read(*names, **kwargs):
+    return io.open(
+        join(dirname(__file__), *names),
+        encoding=kwargs.get("encoding", "utf-8")
+    ).read()
+
 
 setup(
     name="oseoserver",
-    version=__version__,
+    version=read("VERSION"),
     description="A django app that implements the OGC ordering standard (OSEO)",
     long_description="",
     author="Ricardo Silva",
     author_email="ricardo.garcia.silva@gmail.com",
-    url="",
+    url="https://github.com/pyoseo/django-oseoserver",
     classifiers=[""],
     platforms=[""],
-    license="",
+    license="apache",
     packages=find_packages(),
     include_package_data=True,
     entry_points= {
@@ -23,13 +34,10 @@ setup(
     install_requires=[
         "celery",
         "django",
-        #"django-activity-stream",
         "django-mail-queue",
         "django-sendfile",
         "enum34",
-        #"flower",
         "html2text",
-        #"librabbitmq",
         "lxml",
         "pyxb",
         "redis",
