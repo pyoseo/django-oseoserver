@@ -27,6 +27,7 @@ def get_max_active_items():
 def get_massive_order_max_size():
     return _get_setting("OSEOSERVER_MASSIVE_ORDER_MAX_SIZE", 1000)
 
+
 def get_product_order():
     return _get_setting(
         "OSEOSERVER_PRODUCT_ORDER",
@@ -97,6 +98,7 @@ def get_massive_order():
             }
         }
     )
+
 
 def get_processing_options():
     return _get_setting(

@@ -18,6 +18,7 @@ from __future__ import absolute_import
 import logging
 
 from django.core.urlresolvers import reverse
+from django.conf import settings as django_settings
 from pyxb import BIND
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pyxb.bundles.opengis.ows_2_0 as ows
@@ -70,13 +71,13 @@ def build_service_provider():
 
 def build_operations_metadata():
     op_meta = ows.OperationsMetadata()
-    for op_name in requestprocessor.OseoServer.OPERATION_CALLABLES.keys():
+    for op_name in requestprocessor.OPERATION_CALLABLES.keys():
         op = ows.Operation(name=op_name)
         op.DCP.append(BIND())
         op.DCP[0].HTTP = BIND()
         op.DCP[0].HTTP.Post.append(BIND())
         op.DCP[0].HTTP.Post[0].href = "http://{}{}".format(
-            settings.get_site_domain(), reverse("oseo_endpoint"))
+            django_settings.SITE_DOMAIN, reverse("oseo_endpoint"))
         op_meta.Operation.append(op)
     return op_meta
 
