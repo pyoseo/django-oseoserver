@@ -19,6 +19,7 @@ import datetime as dt
 import logging
 
 from django.db import transaction
+from django.core.exceptions import ObjectDoesNotExist
 from lxml import etree
 import pyxb.bundles.opengis.oseo_1_0 as oseo
 import pytz
@@ -93,7 +94,7 @@ def check_order_type_enabled(order_type):
 
     generic_config = utilities.get_generic_order_config(order_type)
     if not generic_config.get("enabled", False):
-        logger.debug("Orders of type {0} are note enabled".format(order_type))
+        logger.debug("Orders of type {0} are not enabled".format(order_type))
         if order_type in (Order.PRODUCT_ORDER,
                           Order.MASSIVE_ORDER):
             raise errors.ProductOrderingNotSupportedError()
@@ -512,7 +513,7 @@ def process_request_order_specification(order_specification, user,
     """Process an order specification.
 
     This function is responsible for parsing the input
-    ``order_order_specification`` into a database record and then returning an
+    ``order_specification`` into a database record and then returning an
     OSEO response to signal that the request has been handled. Further order
     processing is done elsewhere:
 
@@ -582,19 +583,22 @@ def process_request_order_specification(order_specification, user,
         )
         order.item_specifications.add(item_specification)
         requested_collections.add(item_specification.collection)
-    logger.debug("Created order item specifications")
-    for collection in requested_collections:
-        if order_specification.deliveryOptions is not None:
+    if order_specification.deliveryOptions is not None:
+        for collection in requested_collections:
             delivery_option = create_delivery_option(
                 oseo_delivery=order_specification.deliveryOptions,
                 collection=collection,
                 order_type=order_type,
                 customizable_item=order
             )
-            delivery_option.order = order
-            delivery_option.save()
-            order.selected_delivery_option = delivery_option
-            order.save()
+            try:
+                order.selected_delivery_option
+            except ObjectDoesNotExist:
+                delivery_option.order = order
+                delivery_option.save()
+                order.selected_delivery_option = delivery_option
+                order.save()
+                break
     logger.debug("Extracted order delivery options")
     # order options are processed last because we need to know the order
     # items first
