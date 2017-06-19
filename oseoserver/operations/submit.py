@@ -205,8 +205,8 @@ def create_item_specification(item, item_processor, order_type):
                 customizable_item=item_specification,
                 item_processor=item_processor
             )
-            item_specification.selected_options.add(option)
             option.save()
+            item_specification.selected_options.add(option)
     if item.deliveryOptions is not None:
         item_delivery = create_delivery_option(
             oseo_delivery=item.deliveryOptions,
