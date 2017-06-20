@@ -73,9 +73,9 @@ def expire_item(self, item_id):
 
 
 @shared_task(bind=True)
-def notify_user_batch_available(self, *item_ids):
-    item = models.OrderItem.objects.get(pk=item_ids[0])
-    mailsender.send_product_batch_available_email(item.batch)
+def notify_user_batch_available(self, _results, batch_id):
+    batch = models.Batch.objects.get(pk=batch_id)
+    mailsender.send_product_batch_available_email(batch)
 
 
 @shared_task(bind=True)
@@ -95,9 +95,8 @@ def process_batch(self, batch_id):
     config = utilities.get_generic_order_config(batch.order.order_type)
     notify_batch_available = config["notifications"]["batch_availability"]
     if notify_batch_available.lower() == "immediate":
-        callback = notify_user_batch_available.signature()
-        batch_chord = chord(item_tasks)(callback)
-        #batch_chord.get()
+        callback = notify_user_batch_available.signature((batch_id,))
+        chord(item_tasks)(callback)
     else:
         batch_group = group(item_tasks)
         batch_group.apply_async()
