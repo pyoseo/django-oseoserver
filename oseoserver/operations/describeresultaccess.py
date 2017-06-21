@@ -66,8 +66,6 @@ def describe_result_access(request, user):
     response = oseo.DescribeResultAccessResponse(status='success')
 
     item_id = None
-    if (len(completed_items) == 1 and order.packaging == Order.ZIP):
-        item_id = "Packaged order items"
     for item in completed_items:
         iut = oseo.ItemURLType()
         iut.itemId = item_id or item.item_specification.item_id
@@ -114,8 +112,6 @@ def get_batch_completed_items(batch, behaviour):
     last_time = batch.order.last_describe_result_access_request
     list_all_items = last_time is None or behaviour == batch.ALL_READY
     order_delivery = batch.order.selected_delivery_option.delivery_type
-    completed = []
-
     batch_complete_items = []
     queryset = batch.order_items.filter(
         status=batch.order.COMPLETED
@@ -142,8 +138,4 @@ def get_batch_completed_items(batch, behaviour):
             behaviour == batch.NEXT_READY and completed_since_last)
         if list_all_items or list_this_item:
             batch_complete_items.append(item)
-    if batch.order.packaging == Order.ZIP:
-        completed.append(batch_complete_items[0])
-    else:  # lets get each file that is complete
-        completed = batch_complete_items
-    return completed
+    return batch_complete_items

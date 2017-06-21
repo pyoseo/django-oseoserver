@@ -541,6 +541,9 @@ def process_request_order_specification(order_specification, user,
     order_type = get_order_type(order_specification)
     logger.debug("Processing specification for {0!r}".format(order_type))
     check_order_type_enabled(order_type)
+    if order_specification.packaging is not None:
+        logger.critical("Packaging is not implemented")
+        raise errors.NoApplicableCodeError()
     order = models.Order(
         status=Order.SUBMITTED,
         additional_status_info="Order is awaiting approval",
