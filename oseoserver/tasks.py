@@ -153,8 +153,14 @@ def process_item(self, order_item_id):
         "Item is being processed (Try number {}".format(self.request.retries)
     )
     prepared_url = order_item.prepare()
-    delivered_url = order_item.deliver(prepared_url)
-    return delivered_url
+    try:
+        delivered_url = order_item.deliver(prepared_url)
+    except Exception:
+        msg = "could not deliver item {!r}".format(order_item_id)
+        logger.exception(msg)
+        raise RuntimeError(msg)
+    else:
+        return delivered_url
 
 
 # TODO - Test this code

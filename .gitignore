@@ -12,3 +12,4 @@ celerybeat-schedule
 .cache/**
 .coverage
 
+oseoserver_interactive_test.py

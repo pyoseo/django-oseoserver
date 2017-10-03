@@ -1,6 +1,5 @@
 """unit tests for oseoserver.models"""
 
-from django.contrib.auth import get_user_model
 import pytest
 
 from oseoserver import models
