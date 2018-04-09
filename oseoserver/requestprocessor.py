@@ -44,7 +44,6 @@ result, status_code, response_headers = s.process_request(request)
 #
 from __future__ import absolute_import
 import datetime as dt
-import importlib
 import logging
 from itertools import product
 
@@ -326,9 +325,7 @@ def get_operation(request):
 
     oseo_op = request.toDOM().firstChild.tagName.partition(":")[-1]
     operation_function_path = OPERATION_CALLABLES[oseo_op]
-    module_path, _, function_name = operation_function_path.rpartition(".")
-    the_module = importlib.import_module(module_path)
-    the_operation = getattr(the_module, function_name)
+    the_operation = utilities.import_callable(operation_function_path)
     return the_operation, oseo_op
 
 

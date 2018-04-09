@@ -110,20 +110,36 @@ def get_subscription_duration(order, collection):
     return convert_date_range_option(date_range.value)
 
 
-def import_class(python_path, *instance_args, **instance_kwargs):
-    """
-    """
-
-    module_path, sep, class_name = python_path.rpartition('.')
+def import_callable(python_path):
+    module_path, callable_name = python_path.rpartition('.')[::2]
     try:
         the_module = importlib.import_module(module_path)
-        the_class = getattr(the_module, class_name)
-        instance = the_class(*instance_args, **instance_kwargs)
-    except ImportError:
+        the_callable = getattr(the_module, callable_name)
+    except (ImportError, AttributeError):
         raise errors.ServerError(
             "Invalid configuration: {0}".format(python_path))
     else:
-        return instance
+        return the_callable
+
+
+def get_item_processing_type(collection, item_identifier, item_options):
+    conf = [
+        c for c in settings.get_collections() if c["name"] == collection][0]
+    declared_type = conf.get("item_processing", "parallel")
+    if declared_type.lower() not in ("parallel", "sequential"):
+        type_callable = import_callable(declared_type)
+        parsed_type = type_callable(
+            item_identifier, **item_options)
+    else:
+        parsed_type = declared_type
+    return parsed_type.lower()
+
+
+def import_class(python_path, *instance_args, **instance_kwargs):
+    """
+    """
+    the_class = import_callable(python_path)
+    return the_class(*instance_args, **instance_kwargs)
 
 
 def validate_collection_id(collection_id):
