@@ -1,5 +1,4 @@
 import logging
-import os
 try:
     from io import StringIO
 except ImportError:  # python2
@@ -43,7 +42,7 @@ def send_moderation_request_email(order_type, order_id):
     moderation_uri = reverse(
         'admin:oseoserver_orderpendingmoderation_changelist')
     url = "http://{}{}".format(domain, moderation_uri)
-    template = "order_waiting_moderation.html"
+    template = "oseoserver/order_waiting_moderation.html"
     context = {
         "order_type": order_type,
         "order_id": order_id,
@@ -90,7 +89,7 @@ def send_batch_packaging_failed_email(batch, error):
 
 
 def send_order_cancelled_email(order, recipients):
-    template = "order_cancelled.html"
+    template = "oseoserver/order_cancelled.html"
     context = {
         "order_type": order.order_type,
         "reference": order.reference,
@@ -112,7 +111,7 @@ def send_subscription_terminated_email(order, recipients):
     recipients: list
         An iterable with the e-mail addresses to be notified
     """
-    template = "subscription_terminated.html"
+    template = "oseoserver/subscription_terminated.html"
     context = {
         "order": order,
     }
@@ -139,7 +138,7 @@ def send_subscription_moderated_email(order, approved, recipients):
     subscription_order_settings = oseo_settings.get_subscription_order()
     item_availability_days = subscription_order_settings[
         "item_availability_days"]
-    template = "subscription_moderated.html"
+    template = "oseoserver/subscription_moderated.html"
     item_spec = order.item_specifications.get()
     collection_name = item_spec.collection
     collection_settings = utilities.get_collection_settings(
@@ -167,7 +166,7 @@ def send_subscription_moderated_email(order, approved, recipients):
 def send_product_order_moderated_email(order, approved, recipients):
     product_order_settings = oseo_settings.get_product_order()
     item_availability_days = product_order_settings["item_availability_days"]
-    template = "productorder_moderated.html"
+    template = "oseoserver/productorder_moderated.html"
     context = {
         "order": order,
         "approved": approved,
@@ -196,7 +195,7 @@ def send_subscription_batch_available_email(batch):
         "urls": urls,
         "collections": collections,
     }
-    template = "subscription_batch_available.html"
+    template = "oseoserver/subscription_batch_available.html"
     subject = "Copernicus Global Land Service - Subscription files available"
     msg = render_to_string(template, context)
     recipients = [batch.order.user]
@@ -207,34 +206,52 @@ def send_product_batch_available_email(batch):
     urls = []
     for order_item in batch.order_items.all():
         urls.append(order_item.url)
-    context = {
-        "batch": batch,
-        "urls": urls,
-    }
-    template = "normal_product_batch_available.html"
-    subject = "Copernicus Global Land Service - Order {} available".format(
-        batch.order.id)
-    msg = render_to_string(template, context)
-    recipients = [batch.order.user]
-    send_email(subject, msg, recipients, html=True)
+    send_email(
+        subject=render_to_string(
+            "oseoserver/normal_product_batch_available_subject.txt",
+            context={
+                "site_name": Site.objects.get_current().name,
+                "order_id": batch.order.id
+            }
+        ).strip("\n"),
+        message=render_to_string(
+            "oseoserver/normal_product_batch_available.html",
+            context={
+                "batch": batch,
+                "urls": urls,
+            }
+        ),
+        recipients=[batch.order.user],
+        html=True
+    )
 
 
 def send_item_processing_failed_email(order_item, task_id, exception,
                                       task_args, traceback):
-    context = {
-        "order_item": order_item,
-        "task_id": task_id,
-        "args": task_args,
-        "exception": exception,
-        "traceback": highlight(traceback, PythonLexer(), HtmlFormatter()),
-    }
-    template = "order_item_failed.html"
-    subject = ("Copernicus Global Land Service - Order item {} processing "
-               "failed".format(order_item.id))
     UserModel = get_user_model()
     recipients = UserModel.objects.filter(is_staff=True).exclude(email="")
-    msg = render_to_string(template, context)
-    send_email(subject, msg, recipients, html=True)
+    send_email(
+        subject=render_to_string(
+            "oseoserver/order_item_failed_subject.txt",
+            context={
+                "site_name": Site.objects.get_current().name,
+                "item_identifier": order_item.identifier
+            }
+        ).strip("\n"),
+        message=render_to_string(
+            "oseoserver/order_item_failed.html",
+            {
+                "item_identifier": order_item,
+                "task_id": task_id,
+                "args": task_args,
+                "exception": exception,
+                "traceback": highlight(
+                    traceback, PythonLexer(), HtmlFormatter()),
+            }
+        ),
+        recipients=recipients,
+        html=True
+    )
 
 
 def send_invalid_request_email(request_data, exception_report):
@@ -247,7 +264,7 @@ def send_invalid_request_email(request_data, exception_report):
         StringIO(exception_report),
         name="exception_report.xml"
     )
-    template = "invalid_request.html"
+    template = "oseoserver/invalid_request.html"
     msg = render_to_string(template)
     subject = ("Copernicus Global Land Service - Received invalid request")
     recipients = get_user_model().objects.filter(
