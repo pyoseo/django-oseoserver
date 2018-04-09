@@ -31,6 +31,7 @@ from . import settings
 logger = logging.getLogger(__name__)
 
 
+@python_2_unicode_compatible
 class AbstractDeliveryAddress(models.Model):
     first_name = models.CharField(max_length=50, blank=True)
     last_name = models.CharField(max_length=50, blank=True)
@@ -47,8 +48,10 @@ class AbstractDeliveryAddress(models.Model):
     class Meta:
         abstract = True
 
+    def __str__(self):
+        return "{0.first_name} {0.last_name} {0.city}".format(self)
 
-@python_2_unicode_compatible
+
 class CustomizableItem(models.Model):
     SUBMITTED = "Submitted"
     ACCEPTED = "Accepted"
@@ -117,7 +120,6 @@ class Extension(models.Model):
         return self.text
 
 
-@python_2_unicode_compatible
 class DeliveryInformation(AbstractDeliveryAddress):
     order = models.OneToOneField(
         "Order",
@@ -127,7 +129,6 @@ class DeliveryInformation(AbstractDeliveryAddress):
     )
 
 
-@python_2_unicode_compatible
 class InvoiceAddress(AbstractDeliveryAddress):
     order = models.OneToOneField(
         "Order",
@@ -256,7 +257,6 @@ class Order(CustomizableItem):
         return result
 
 
-@python_2_unicode_compatible
 class OrderPendingModerationManager(models.Manager):
 
     def get_queryset(self):
@@ -272,6 +272,9 @@ class OrderPendingModeration(Order):
     class Meta:
         proxy = True
         verbose_name_plural = "orders pending moderation"
+
+    def __str__(self):
+        return super(OrderPendingModeration, self).__str__()
 
 
 class ItemSpecification(models.Model):
@@ -465,9 +468,15 @@ class OrderItem(CustomizableItem):
         return result
 
     def export_options(self):
-        valid_options = dict()
+        valid_options = {}
+        options_conf = settings.get_processing_options()
         for option in self.get_options():
-            valid_options[option.option] = option.value
+            conf = [c for c in options_conf if c["name"] == option.option][0]
+            if conf.get("multiple_entries"):
+                valid_options.setdefault(option.option, [])
+                valid_options[option.option].append(option.value)
+            else:
+                valid_options[option.option] = option.value
         return valid_options
 
     def get_delivery_options(self):
@@ -500,12 +509,16 @@ class OrderItem(CustomizableItem):
                 result.append(order_option)
         return result
 
-    def prepare(self):
+    def prepare(self, batch_data=None):
+        batch_data = dict(batch_data) if batch_data is not None else {}
         item_processor = utilities.get_item_processor(
             order_type=self.batch.order.order_type)
+        processor_batch_data = batch_data.get(
+            item_processor.__class__.__name__)
         url = item_processor.prepare_item(
             identifier=self.identifier,
-            options=self.export_options()
+            options=self.export_options(),
+            batch_data=processor_batch_data
         )
         return url
 
@@ -676,7 +689,6 @@ class BaseDeliveryOption(models.Model):
         return "{0.delivery_type}, {0.delivery_details}".format(self)
 
 
-@python_2_unicode_compatible
 class OrderDeliveryOption(BaseDeliveryOption):
     order = models.OneToOneField(
         'Order',
@@ -686,7 +698,6 @@ class OrderDeliveryOption(BaseDeliveryOption):
     )
 
 
-@python_2_unicode_compatible
 class ItemSpecificationDeliveryOption(BaseDeliveryOption):
     item_specification = models.OneToOneField(
         'ItemSpecification',
@@ -727,6 +738,14 @@ class Batch(models.Model):
 
     def __str__(self):
         return "id: {0.id}, order: {0.order.id}".format(self)
+
+    def get_item_processors(self):
+        processors = []
+        for item in self.order_items.all():
+            processor = utilities.get_item_processor(self.order.order_type)
+            if processor.__class__ not in [p.__class__ for p in processors]:
+                processors.append(processor)
+        return processors
 
     def save(self, *args, **kwargs):
         """Save batch instance into the database.

@@ -22,15 +22,12 @@ Installation
      cd -
      rm -rf $BUILD_DIR
 
-* Download the `django-oseoserver` package and install it
-* Add `oseoserver` to installed_apps
-* Add the following oseoserver dependencies to installed_apps (they have
-  been automatically installed when you installed django-oseoserver:
+* Download the ``django-oseoserver`` package and install it
 
-  * grappelli
-  * actstream
-  * tastypie
-  * mailqueue
+* Add ``oseoserver`` to installed_apps
+
+* Add ``mailqueue`` installed_apps (it has been automatically installed when
+  you installed django-oseoserver):
 
 * Add the following settings to your `settings.py` file:
 
@@ -77,16 +74,13 @@ Installation
   * `MAIL_USE_SSL`
 
 * Add urlconf for `oseoserver`
+
 * Run `migrate` to update the structure of the database
-* Run the `oseodefaults` management command in order to insert default
-  data into the database
-* If you are configuring a blank django run the `createsuperuser` management
-  command in order to generate an administrator. Be sure to assign it an
-  e-mail address
-* Use the admin interface to create a tastypie API key for the admin user.
+
 * Installation is done! Now move on to the
   :doc:`configuration <configuration>` section so that you can get oseoserver
   ready to be used
+
 
 Example
 -------

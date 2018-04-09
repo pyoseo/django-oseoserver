@@ -32,12 +32,10 @@ from __future__ import division
 from __future__ import absolute_import
 import datetime as dt
 
-import celery
-from celery import chord
 from celery import group
 from celery import shared_task
 from celery import Task
-from celery.result import AsyncResult
+from celery.result import allow_join_result
 from celery.utils.log import get_task_logger
 import pytz
 
@@ -73,14 +71,41 @@ def expire_item(self, item_id):
 
 
 @shared_task(bind=True)
-def notify_user_batch_available(self, _results, batch_id):
+def notify_user_batch_available(self, batch_id):
     batch = models.Batch.objects.get(pk=batch_id)
     mailsender.send_product_batch_available_email(batch)
+
+
+def prepare_items_by_processing_type(order_items):
+    sequential_items = []
+    parallel_items = []
+    for item in order_items:
+        processing_type = utilities.get_item_processing_type(
+            collection=item.item_specification.collection,
+            item_identifier=item.identifier,
+            item_options=item.export_options()
+        )
+        if processing_type == "sequential":
+            sequential_items.append({
+                "id": item.id,
+                "identifier": item.identifier,
+                "options": item.export_options(),
+            })
+        else:
+            parallel_items.append({
+                "id": item.id,
+                "identifier": item.identifier,
+                "options": item.export_options()
+            })
+    return sequential_items, parallel_items
 
 
 @shared_task(bind=True)
 def process_batch(self, batch_id):
     """Process a batch in the queue.
+
+    Order items may be processed in parallel or in sequence, depending on the
+    value of the ``item_processing`` setting of their respective collection.
 
     Parameters
     ----------
@@ -90,20 +115,81 @@ def process_batch(self, batch_id):
     """
 
     batch = models.Batch.objects.get(id=batch_id)
-    item_tasks = [
-        process_item.signature((i.id,)) for i in batch.order_items.all()]
+    sequential_items, parallel_items = prepare_items_by_processing_type(
+        batch.order_items.all())
+    logger.debug("sequential_item: {}".format(sequential_items))
+    logger.debug("parallel_items: {}".format(parallel_items))
+    batch_data = {}
+    for processor in batch.get_item_processors():
+        batch_processor_data = processor.prepare_batch(
+            sequential_items, parallel_items, batch.order.user.username)
+        batch_data[processor.__class__.__name__] = batch_processor_data
+    tasks = []
+    for item_info in parallel_items:
+        sig = process_item.signature(
+            (item_info["id"],),
+            {"batch_data": batch_data}
+        )
+        tasks.append(sig)
+    if len(sequential_items) > 0:
+        tasks += [
+            process_items_sequentially.signature(
+                ([i["id"] for i in sequential_items],),
+                {"batch_data": batch_data}
+            )
+        ]
+    logger.debug("tasks: {}".format(tasks))
     config = utilities.get_generic_order_config(batch.order.order_type)
     notify_batch_available = config["notifications"]["batch_availability"]
+    batch_group = group(tasks)
+    batch_group.apply_async()
     if notify_batch_available.lower() == "immediate":
-        callback = notify_user_batch_available.signature((batch_id,))
-        chord(item_tasks)(callback)
+        callback = notify_user_batch_available.signature(
+            (batch_id,), immutable=True)
+        with allow_join_result():
+            (batch_group | callback).apply_async()
     else:
-        batch_group = group(item_tasks)
         batch_group.apply_async()
 
 
+class ProcessItemTaskSequential(Task):
+    """A custom task that implements custom handlers.
+
+    This class is the base for the ``process_items_sequentially()`` task.
+    This task is responsible for processing ordered items. The on_failure
+    and on_success methods are reimplemented here in order to update each
+    order item's status in the database after the task is done.
+
+    """
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        for item_id in args[0]:
+            order_item = models.OrderItem.objects.get(pk=item_id)
+            order_item.set_status(
+                order_item.FAILED,
+                exc.args
+            )
+            mailsender.send_item_processing_failed_email(
+                order_item, task_id, exc, args, einfo.traceback)
+
+    def on_success(self, retval, task_id, args, kwargs):
+        for item_id in args[0]:
+            order_item = models.OrderItem.objects.get(pk=item_id)
+            order_item.set_status(order_item.COMPLETED)
+
+
+@shared_task(
+    bind=True,
+    base=ProcessItemTaskSequential,
+)
+def process_items_sequentially(self, item_ids, batch_data=None):
+    """Process a series of order items sequentially, one after the other"""
+    for item_id in item_ids:
+        process_item(item_id, batch_data=batch_data)
+
+
 class ProcessItemTask(Task):
-    """A custom task that reimplements the on_failure handler.
+    """A custom task that implements custom handlers.
 
     This class is the base for the ``process_item()`` task. This task is
     responsible for processing ordered items. The on_failure and on_success
@@ -122,6 +208,7 @@ class ProcessItemTask(Task):
                                                      args, einfo.traceback)
 
     def on_success(self, retval, task_id, args, kwargs):
+        logger.debug("on_success called with: {}".format(locals()))
         order_item = models.OrderItem.objects.get(pk=args[0])
         order_item.set_status(order_item.COMPLETED)
 
@@ -133,7 +220,7 @@ class ProcessItemTask(Task):
     default_retry_delay=30,  # seconds
     max_retries=3,
 )
-def process_item(self, order_item_id):
+def process_item(self, order_item_id, batch_data=None):
     """Process an order item
 
     Processing is composed by two steps:
@@ -152,15 +239,29 @@ def process_item(self, order_item_id):
         order_item.IN_PRODUCTION,
         "Item is being processed (Try number {}".format(self.request.retries)
     )
-    prepared_url = order_item.prepare()
-    try:
-        delivered_url = order_item.deliver(prepared_url)
-    except Exception:
-        msg = "could not deliver item {!r}".format(order_item_id)
-        logger.exception(msg)
-        raise RuntimeError(msg)
-    else:
-        return delivered_url
+    prepared_url = order_item.prepare(batch_data=batch_data)
+    delivered_url = order_item.deliver(prepared_url)
+    return delivered_url
+
+
+def _process_item(order_item_id, batch_data=None):
+    """Process an order item
+
+    Processing is composed by two steps:
+
+    * Preparing the item according to any customization options that might
+      have been requested;
+    * Delivering the prepared item using the delivery method requested
+
+    This task inherits the ProcessItemTask so that it may be possible to
+    update the order item's status in case of failure
+
+    """
+    order_item = models.OrderItem.objects.get(pk=order_item_id)
+    order_item.set_status(order_item.IN_PRODUCTION, "Item is being processed")
+    prepared_url = order_item.prepare(batch_data=batch_data)
+    delivered_url = order_item.deliver(prepared_url)
+    return delivered_url
 
 
 # TODO - Test this code
