@@ -46,8 +46,17 @@ def item_specification_change_form_link(instance):
     result = format_html(
         '<a href="{}">Item specification {}</a>', change_form_url, instance.id)
     return result
-item_specification_change_form_link.short_description = (
-    "Details")
+item_specification_change_form_link.short_description = "Details"
+
+
+def order_change_form_link(instance):
+    order_id = instance.order.id
+    change_form_url = reverse(
+        "admin:oseoserver_order_change", args=(order_id,))
+    result = format_html(
+        '<a href="{}">Order {}</a>', change_form_url, order_id)
+    return result
+order_change_form_link.short_description = "Order"
 
 
 class OrderItemInline(admin.StackedInline):
@@ -72,6 +81,11 @@ class SelectedSceneSelectionOptionInline(admin.StackedInline):
 
 class SelectedOrderOptionInline(admin.StackedInline):
     model = models.SelectedOrderOption
+    extra = 0
+
+
+class SelectedItemOptionInline(admin.StackedInline):
+    model = models.SelectedItemOption
     extra = 0
 
 
@@ -249,7 +263,21 @@ class PendingOrderAdmin(admin.ModelAdmin):
 
 @admin.register(models.ItemSpecification)
 class ItemSpecificationAdmin(admin.ModelAdmin):
+    readonly_fields = (
+        #"order",
+        order_change_form_link,
+    )
+    fields = (
+        # "order",
+        order_change_form_link,
+        "item_id",
+        "collection",
+        "identifier",
+        "remark",
+        "extension",
+    )
     inlines = (
+        SelectedItemOptionInline,
         ItemSpecificationDeliveryOptionInline,
     )
 
