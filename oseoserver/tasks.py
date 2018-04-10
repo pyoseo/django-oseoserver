@@ -142,7 +142,6 @@ def process_batch(self, batch_id):
     config = utilities.get_generic_order_config(batch.order.order_type)
     notify_batch_available = config["notifications"]["batch_availability"]
     batch_group = group(tasks)
-    batch_group.apply_async()
     if notify_batch_available.lower() == "immediate":
         callback = notify_user_batch_available.signature(
             (batch_id,), immutable=True)
@@ -237,28 +236,8 @@ def process_item(self, order_item_id, batch_data=None):
     order_item = models.OrderItem.objects.get(pk=order_item_id)
     order_item.set_status(
         order_item.IN_PRODUCTION,
-        "Item is being processed (Try number {}".format(self.request.retries)
+        "Item is being processed (Try number {})".format(self.request.retries)
     )
-    prepared_url = order_item.prepare(batch_data=batch_data)
-    delivered_url = order_item.deliver(prepared_url)
-    return delivered_url
-
-
-def _process_item(order_item_id, batch_data=None):
-    """Process an order item
-
-    Processing is composed by two steps:
-
-    * Preparing the item according to any customization options that might
-      have been requested;
-    * Delivering the prepared item using the delivery method requested
-
-    This task inherits the ProcessItemTask so that it may be possible to
-    update the order item's status in case of failure
-
-    """
-    order_item = models.OrderItem.objects.get(pk=order_item_id)
-    order_item.set_status(order_item.IN_PRODUCTION, "Item is being processed")
     prepared_url = order_item.prepare(batch_data=batch_data)
     delivered_url = order_item.deliver(prepared_url)
     return delivered_url
