@@ -339,7 +339,6 @@ class OrderItemAdmin(admin.ModelAdmin):
         "status",
         "status_changed_on",
         "completed_on",
-        "available",
         "link_to_batch",
         "link_to_item_specification",
         "item_specification",

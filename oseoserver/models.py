@@ -429,18 +429,18 @@ class OrderItem(CustomizableItem):
 
         delivery_options = self.get_delivery_options()
         delivery_type = delivery_options.delivery_type
+        self.available = False
+        additional_status_info = (
+                self.additional_status_info +
+                " - Item expired on {}".format(dt.datetime.now(pytz.utc))
+        )
+        self.set_status(self.status, additional_info=additional_status_info)
         if delivery_type == BaseDeliveryOption.ONLINE_DATA_ACCESS:
             try:
                 item_processor.clean_item(self.url)
             except Exception as err:  # replace with a more narrow scoped exception
                 logger.warning(
                     "Could not clean item {!r}: {}".format(self, err))
-        self.available = False
-        additional_status_info = (
-            self.additional_status_info +
-            " - Item expired on {}".format(dt.datetime.now(pytz.utc))
-        )
-        self.set_status(self.status, additional_info=additional_status_info)
 
     def export_delivery_options(self):
         """Return a dictionary with the instance's delivery options.

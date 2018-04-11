@@ -140,8 +140,9 @@ def process_batch(self, batch_id):
         ]
     logger.debug("tasks: {}".format(tasks))
     config = utilities.get_generic_order_config(batch.order.order_type)
-    notify_batch_available = config["notifications"]["batch_availability"]
-    batch_group = group(tasks)
+    notify_batch_available = config.get(
+        "notifications", {}).get("batch_availability", "")
+    batch_group = group(*tasks)
     if notify_batch_available.lower() == "immediate":
         callback = notify_user_batch_available.signature(
             (batch_id,), immutable=True)
