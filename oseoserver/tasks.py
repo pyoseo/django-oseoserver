@@ -32,6 +32,8 @@ from __future__ import division
 from __future__ import absolute_import
 import datetime as dt
 
+from celery import chain
+from celery import chord
 from celery import group
 from celery import shared_task
 from celery import Task
@@ -142,14 +144,20 @@ def process_batch(self, batch_id):
     config = utilities.get_generic_order_config(batch.order.order_type)
     notify_batch_available = config.get(
         "notifications", {}).get("batch_availability", "")
-    batch_group = group(*tasks)
-    if notify_batch_available.lower() == "immediate":
-        callback = notify_user_batch_available.signature(
-            (batch_id,), immutable=True)
-        with allow_join_result():
-            (batch_group | callback).apply_async()
-    else:
-        batch_group.apply_async()
+    notification = notify_batch_available.lower()
+    callback = notify_user_batch_available.signature(
+        (batch_id,), immutable=True)
+    if len(tasks) == 1:
+        if notification == "immediate":
+            chain(tasks[0], callback).apply_async()
+        else:
+            tasks[0].apply_async()
+    elif len(tasks) > 1:
+        batch_group = group(*tasks)
+        if notification == "immediate":
+            chord(batch_group, header=callback).apply_async()
+        else:
+            batch_group.apply_async()
 
 
 class ProcessItemTaskSequential(Task):
