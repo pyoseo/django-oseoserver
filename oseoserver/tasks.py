@@ -155,7 +155,7 @@ def process_batch(self, batch_id):
     elif len(tasks) > 1:
         batch_group = group(*tasks)
         if notification == "immediate":
-            chord(batch_group, header=callback).apply_async()
+            chord(batch_group, body=callback).apply_async()
         else:
             batch_group.apply_async()
 
