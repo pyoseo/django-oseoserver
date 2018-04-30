@@ -9,6 +9,9 @@ def _get_setting(parameter, default_value):
     return getattr(settings, parameter, default_value)
 
 
+def get_mail_recipient_handler():
+    return _get_setting("OSEOSERVER_MAIL_RECIPIENT_HANDLER", None)
+
 def get_processing_class():
     return _get_setting(
         "OSEOSERVER_PROCESSING_CLASS",

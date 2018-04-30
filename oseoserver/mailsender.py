@@ -25,7 +25,6 @@ MAIL_SUBJECT = "Copernicus Global Land Service"
 
 
 
-
 def send_moderation_request_email(order_type, order_id):
     """Send an e-mail to admins informing that an order needs approval.
 
@@ -199,7 +198,7 @@ def send_subscription_batch_available_email(batch):
     subject = "Copernicus Global Land Service - Subscription files available"
     msg = render_to_string(template, context)
     recipients = [batch.order.user]
-    send_email(subject, msg, recipients, html=True)
+    send_email(subject, msg, recipients, html=True, order=batch.order)
 
 
 def send_product_batch_available_email(batch):
@@ -222,7 +221,8 @@ def send_product_batch_available_email(batch):
             }
         ),
         recipients=[batch.order.user],
-        html=True
+        html=True,
+        order=batch.order
     )
 
 
@@ -275,7 +275,8 @@ def send_invalid_request_email(request_data, exception_report):
     )
 
 
-def send_email(subject, message, recipients, html=False, attachments=None):
+def send_email(subject, message, recipients, html=False, attachments=None,
+               order=None):
     """Send emails
 
     Parameters
@@ -292,8 +293,15 @@ def send_email(subject, message, recipients, html=False, attachments=None):
     """
 
     already_emailed = []
-    for recipient in recipients:
-        address = recipient.email
+    custom_recipient_handler = oseo_settings.get_mail_recipient_handler()
+    if custom_recipient_handler is not None:
+        logger.debug("Calling custom recipient handler code...")
+        handler = utilities.import_callable(custom_recipient_handler)
+        final_recipients = handler(
+            subject, message, current_recipients=recipients, order=order)
+    else:
+        final_recipients = [r.email for r in recipients]
+    for address in final_recipients:
         if address != "" and address not in already_emailed:
             msg = MailerMessage(
                 subject=subject,
