@@ -250,7 +250,8 @@ def send_item_processing_failed_email(order_item, task_id, exception,
             }
         ),
         recipients=recipients,
-        html=True
+        html=True,
+        order=order_item.batch.order
     )
 
 
@@ -301,6 +302,7 @@ def send_email(subject, message, recipients, html=False, attachments=None,
             subject, message, current_recipients=recipients, order=order)
     else:
         final_recipients = [r.email for r in recipients]
+    logger.debug("email recipients: {}".format(final_recipients))
     for address in final_recipients:
         if address != "" and address not in already_emailed:
             msg = MailerMessage(
